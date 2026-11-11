@@ -48,3 +48,5 @@
 2026-11-11T06:01:53Z | done T08 haiku r1, T09 opus r1, T10 sonnet r1, T11 haiku r1
 2026-11-11T06:01:53Z | done T12 fable approve (lows fixed directly in 568d095; 246 passed)
 2026-11-11T06:01:53Z | build complete: T08-T12 done
+2026-11-11T06:03:20Z | done history rewrite: filter-repo replace-text, 0 sensitive lines left, force-pushed main once (lease on old sha). Old SHAs still reachable on GitHub until purged (Support or repo re-create).
+2026-11-11T06:03:20Z | history rewritten and force-pushed once
