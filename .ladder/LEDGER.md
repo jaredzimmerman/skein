@@ -50,3 +50,5 @@
 2026-11-11T06:01:53Z | build complete: T08-T12 done
 2026-11-11T06:03:20Z | done history rewrite: filter-repo replace-text, 0 sensitive lines left, force-pushed main once (lease on old sha). Old SHAs still reachable on GitHub until purged (Support or repo re-create).
 2026-11-11T06:03:20Z | history rewritten and force-pushed once
+2026-11-11T06:04:40Z | done private deploy of 8caf5e8: service active, proxy reloaded, 4 members, point=claude, live smoke passed (REST+MCP, 401, forbidden)
+2026-11-11T06:04:40Z | deployed privately; smoke passed
