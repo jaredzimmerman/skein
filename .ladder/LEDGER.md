@@ -28,3 +28,8 @@
 2026-11-11T05:36:33Z | T03: review r1 approve
 2026-11-11T05:43:00Z | T07: final review changes
 2026-11-11T05:45:11Z | decision: scrub tracked ladder notes of local/account details; briefs T08-T12 from T07 review
+2026-11-11T05:45:38Z | done T03 opus r1 (fable approve)
+2026-11-11T05:45:38Z | done T04 haiku r1
+2026-11-11T05:45:38Z | review-fail T07 fable: 1 high (public ladder notes), 2 medium (token in access log, config types), lows → T08-T12
+2026-11-11T05:45:38Z | started wave3 workflow runId=wf_336b6976-108 scriptPath=<local session dir> (T08 haiku→T09 opus, T10 sonnet, T11 haiku, then T12 fable)
+2026-11-11T05:45:39Z | wave3 started
