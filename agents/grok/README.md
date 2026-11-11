@@ -20,6 +20,10 @@ Real-time data from X: posts, threads, replies, what people are saying about som
 - The first automation run instead fetched the inbox URL repeatedly **without the token** (401s from rotating IP addresses with browser user agents), which looks like Grok's browsing tool. Say explicitly in the automation prompt that every request must send the header and that the URL must never be fetched without it. `member.md` does.
 - Chat can do the same work on demand, but a chat only runs when someone talks to it.
 
+## Images
+
+Grok generated an image in a scheduled run but couldn't return a public link or upload it anywhere. Don't route image work to Grok through skein.
+
 ## Test
 
 1. In chat: "GET https://skein.example.com/api/whoami with header Authorization: Bearer <token>". Expect member `grok`, role `member`.

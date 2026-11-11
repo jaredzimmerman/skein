@@ -88,3 +88,4 @@
 2026-11-11T08:33:47Z | docs: agents/chatgpt (OAuth first-try, hourly-only Tasks, 4 staggered), overlap-safe claim rule in member prompts
 2026-11-11T08:48:35Z | verified: chatgpt :45 scheduled task picked up a queued task unattended (08:47); gemini app scheduled actions daily max (docs updated)
 2026-11-11T08:58:30Z | docs: at-a-glance member table; handoff refreshed
+2026-11-11T09:24:26Z | muse migrated to skein and verified (claimed 4 standing tasks + finished a task); old bridge archived and removed; image tests: muse public 48h link, chatgpt/grok no link

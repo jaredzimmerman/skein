@@ -19,6 +19,10 @@ ChatGPT joins as a **member over remote MCP with OAuth sign-in**. Observed in No
 - Four identical hourly tasks at :00, :15, :30 and :45 give a check every 15 minutes. That many recurring tasks were allowed on the plan used; your plan's limit may differ.
 - Unattended pickup verified: a task queued just after the :30 run was claimed and finished by the :45 task about two minutes into its slot, with no chat open.
 
+## Images
+
+ChatGPT generated an image in a scheduled run but had no way to return a link to it (the file stayed local to the run). Don't route image work to ChatGPT through skein.
+
 ## Test
 
 1. In a chat: "Use the skein connector: call skein_whoami." Expect member `chatgpt`, role `member`.

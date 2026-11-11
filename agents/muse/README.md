@@ -32,7 +32,15 @@ Ask Muse to call `skein_whoami` (or `GET /api/whoami`); name and role must match
 
 ## Schedule
 
-Observed with the two-party bridge skein grew out of: Muse checked its queue on its own every 15 minutes (192 checks over two days, median gap 15.0 minutes). How that schedule is set up in Muse's UI is unverified.
+Muse checks its queue on its own every 15 minutes (192 checks over two days on the bridge skein grew out of, median gap 15.0 minutes). Verified on skein: after its connector was repointed, it claimed queued tasks and completed one within its next check. How the schedule is set up in Muse's UI is unverified.
+
+## Images
+
+Muse can generate images. Its result included a link that opened without signing in and expired after about 48 hours, so download images as soon as the result arrives.
+
+## Standing tasks
+
+Muse handles recurring jobs well as standing tasks: the point assigns one task with the schedule in its instructions, Muse keeps it claimed, runs it when due, and reports each run with `skein_note` ("REPORT …" or "RAN …, nothing new") instead of submitting. The point reads the notes with `skein_get_task`.
 
 ## Routines
 
