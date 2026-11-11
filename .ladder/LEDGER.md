@@ -35,3 +35,4 @@
 2026-11-11T05:45:39Z | wave3 started
 2026-11-11T05:46:36Z | T10: reserved names, point-disable guard, result-replaced note
 2026-11-11T05:47:39Z | T10: review r1 approve
+2026-11-11T05:47:46Z | T11: docs and deploy fixes from final review
