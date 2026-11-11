@@ -82,3 +82,5 @@
 2026-11-11T07:44:07Z | done redeploy a538239 with oauth on: v1→v2 migration kept 4 members/3 tasks; discovery, DCR, consent redirect verified live; local real-browser consent flow verified (meta-refresh hand-back, token exchange, code reuse refused, no secrets in logs). Note: pip skipped same-version upgrade → brief restart loop; use --force-reinstall for git installs.
 2026-11-11T07:44:07Z | verified: a member automation picked up a queued task in its scheduled slot with no chat (07:32)
 2026-11-11T07:44:07Z | oauth deployed and verified
+2026-11-11T08:08:02Z | verified: an OAuth-only client (via its web app) completed DCR → consent → token as member gemini; the desktop app stalled on the vendor linking page before /authorize (vendor-side). Cleaned unused DCR clients and temp debug logging.
+2026-11-11T08:08:02Z | gemini connected via oauth
