@@ -69,3 +69,5 @@
 2026-11-11T07:26:07Z | review-fail T15 fable: no security hole; Basic client auth + revoke form compat (medium), docs, consent hand-back, /register 500, loopback edge cases → T16/T17
 2026-11-11T07:26:07Z | decision: consent hands back via a 200 no-store page (meta refresh + Continue link) instead of a 303, keeping C8 form-action 'self' exactly
 2026-11-11T07:26:07Z | T13-T15 done; briefs T16 T17 from T15 review
+2026-11-11T07:26:32Z | started oauth-fixes workflow runId=wf_b55eccf9-38d scriptPath=<local session dir> (T16 opus, T17 haiku)
+2026-11-11T07:26:32Z | oauth-fixes started
