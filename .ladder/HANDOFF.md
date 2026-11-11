@@ -1,7 +1,7 @@
 # Handoff: 2026-11-11
-Phase: OAuth built and reviewed; redeploying
+Phase: OAuth deployed; waiting on Gemini sign-in by user
 In flight: none
-Next action: local browser check of consent hand-back, then redeploy with oauth on per gitignored notes
+Next action: user adds Gemini connector (URL only) and approves with gemini member token; then Gemini scheduled check-in; then remove ~/.config/skein/gemini-mcp.sh + gemini.token on the Mac
 Blocked on human: none (history rewrite approved; do it after wave 3, then force-push once)
 Workflow: see LEDGER for the latest runId (script paths are local-only)
 Notes:

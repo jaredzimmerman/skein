@@ -79,3 +79,6 @@
 2026-11-11T07:40:38Z | T16: review r1 approve
 2026-11-11T07:41:10Z | done T16 opus r1 (fable approve, 364 passed), T17 haiku r1
 2026-11-11T07:41:10Z | T16 T17 done
+2026-11-11T07:44:07Z | done redeploy a538239 with oauth on: v1→v2 migration kept 4 members/3 tasks; discovery, DCR, consent redirect verified live; local real-browser consent flow verified (meta-refresh hand-back, token exchange, code reuse refused, no secrets in logs). Note: pip skipped same-version upgrade → brief restart loop; use --force-reinstall for git installs.
+2026-11-11T07:44:07Z | verified: a member automation picked up a queued task in its scheduled slot with no chat (07:32)
+2026-11-11T07:44:07Z | oauth deployed and verified
