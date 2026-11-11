@@ -23,5 +23,16 @@ Assistants only act when someone talks to them or on a schedule, so a check-in i
 - `_template/`: copy to add a new assistant.
 - `claude/`: Claude (Claude Code, claude.ai, Claude desktop), plus a Claude Code skill.
 - `muse/`: Meta Muse.
+- `grok/`: Grok, a member over REST with two staggered hourly automations.
+- `gemini/`: Gemini, a member over remote MCP with OAuth sign-in and a Scheduled task.
+
+## Making a member work unattended
+
+A member that only checks when someone opens a chat isn't much use, so give every member a schedule. What we learned connecting four assistants:
+
+- **Schedulers differ a lot.** One checked every 15 minutes, one allowed at most hourly runs and two recurring automations (staggered to every 30 minutes), one offered a 15-minute schedule. Ask each assistant for the shortest interval its scheduler allows, and tell the point how long to expect (`instance.answer_time`).
+- **A scheduled run is not a chat.** It may have different tools. One assistant's first scheduled run fetched the inbox with a browsing tool that couldn't send the auth header, so every request was refused. Say in the scheduled prompt that every request must carry the token.
+- **Prove it with a task, not with the assistant's report.** As the point, queue a small task between runs, keep the chats closed, and check that a later run claims and submits it. Creating a schedule often runs it once immediately, which proves nothing about recurrence. The audit log (`storage.audit_log`) shows when each call arrived.
+- **Don't trust an assistant's description of its own features.** Check the vendor's UI or docs; two assistants described their connector support wrongly.
 
 Tool names are fixed: `skein_whoami`, `skein_inbox`, `skein_get_task`, `skein_claim`, `skein_note`, `skein_submit`, `skein_ask`, `skein_get_ask` (everyone) and `skein_assign`, `skein_answer`, `skein_follow_up`, `skein_reassign`, `skein_cancel`, `skein_tasks`, `skein_asks`, `skein_members` (point only).

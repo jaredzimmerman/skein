@@ -32,7 +32,7 @@ Ask Muse to call `skein_whoami` (or `GET /api/whoami`); name and role must match
 
 ## Schedule
 
-Unverified: whether Muse can run a prompt on a schedule. If not, it checks only when the user asks "check skein".
+Observed with the two-party bridge skein grew out of: Muse checked its queue on its own every 15 minutes (192 checks over two days, median gap 15.0 minutes). How that schedule is set up in Muse's UI is unverified.
 
 ## Routines
 

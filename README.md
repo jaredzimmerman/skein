@@ -65,9 +65,11 @@ To run the test suite: `uv run pytest -q`.
 ## Connecting assistants
 
 `agents/README.md` explains how a member joins: the URL, where the token goes, and what to check
-afterwards. `agents/_template/` is a starting point for a new assistant. `agents/claude/` and
-`agents/muse/` are the two worked examples. Each folder has a `point.md` for when that assistant is
-the point and a `member.md` for when it is a member. A client that can only sign in with OAuth needs
+afterwards, and how to make sure a member works on a schedule without anyone prompting it.
+`agents/_template/` is a starting point for a new assistant. Worked examples: `agents/claude/`,
+`agents/muse/`, `agents/grok/` (REST with scheduled automations) and `agents/gemini/` (remote MCP
+with OAuth sign-in). Each folder has a `point.md` for when that assistant is the point and a
+`member.md` for when it is a member. A client that can only sign in with OAuth needs
 `[oauth]` turned on first; see OAuth sign-in below.
 
 ## OAuth sign-in
@@ -161,7 +163,8 @@ uv run skein oauth client remove CLIENT_ID
 ```
 
 `client list` shows each client's ID, name, how it was added, its sign-ins and its redirect addresses.
-`client remove` also revokes every token that client holds.
+`client remove` also revokes every token that client holds. Some apps register a new client on every
+connection attempt, so after a failed attempt, remove the registrations that show 0 sign-ins.
 
 ### What ends access
 
@@ -277,6 +280,21 @@ The `deploy/` folder has a systemd unit (`skein.service`) that runs the server a
 match your hostname and path. With OAuth on, set `public_url` to match too, and make sure the proxy
 forwards the root `/.well-known/` metadata paths (both examples do). If you use `url_tokens`, keep
 query strings out of the proxy's access log. `docs/architecture.md` describes how the parts fit together.
+
+On a host shared with other services, limit the root `/.well-known/` forwarding to skein's own paths,
+for example `^/\.well-known/(oauth-authorization-server|openid-configuration)/skein$` and
+`^/\.well-known/oauth-protected-resource/skein(/mcp)?$` when `base_path` is `/skein`, so other
+services' metadata isn't sent to skein.
+
+### Upgrading
+
+1. Back up the database first, with SQLite's backup (for example Python's `sqlite3` `backup()`), not a
+   plain file copy while the server runs. Opening an older database upgrades it in place.
+2. When installing from git at a new commit with the same version number, force the reinstall,
+   otherwise pip keeps the old code: `pip install --force-reinstall --no-deps "git+https://…/skein@<commit>"`.
+3. Check the config loads before restarting: `skein --config /etc/skein/skein.toml status`. A config
+   key the installed code doesn't know stops the server at startup, and systemd will keep restarting it.
+4. Restart, then check `/healthz` and that `skein status` lists your members.
 
 ## License
 
