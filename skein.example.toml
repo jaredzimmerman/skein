@@ -1,0 +1,26 @@
+# skein configuration. Copy to skein.toml (or point SKEIN_CONFIG at it).
+# Every key is optional; the values below are the defaults.
+
+[server]
+# Address the HTTP server binds to. Keep it on localhost and put a reverse proxy in front.
+host = "127.0.0.1"
+port = 8771
+# Path prefix when running behind a shared reverse proxy, e.g. "/skein".
+# Must be "" or start with "/" and not end with "/".
+base_path = ""
+# Extra allowed Host headers for MCP DNS-rebinding protection, e.g. ["skein.example.com"].
+public_hosts = []
+# Also accept ?token=... for clients that cannot send headers. Leave false if you can.
+url_tokens = false
+
+[storage]
+# SQLite database file.
+db = "./skein.db"
+# Optional JSONL audit log path. Empty string disables it. Logs lengths, never content.
+audit_log = ""
+
+[instance]
+# How assistants refer to the human who owns this queue, e.g. "Sam".
+owner = "the user"
+# What members are told about how quickly the point responds.
+answer_time = "within about an hour"

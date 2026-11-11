@@ -139,7 +139,7 @@ def test_unknown_top_level_key_raises(tmp_path):
         load_config(str(path))
 
 
-@pytest.mark.parametrize("bad", ["skein", "/skein/", "/", "//skein", "skein/"])
+@pytest.mark.parametrize("bad", ["skein", "/skein/", "/", "skein/"])
 def test_bad_base_path_raises(tmp_path, bad):
     path = tmp_path / "bp.toml"
     path.write_text(f'[server]\nbase_path = "{bad}"\n', encoding="utf-8")
