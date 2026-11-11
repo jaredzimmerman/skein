@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -106,14 +105,16 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _text(value: Any, field: str, limit: int, *, reject: bool = False, required: bool = True) -> str:
+def _text(
+    value: Any, field: str, limit: int | None = None, *, reject: bool = False, required: bool = True
+) -> str:
     if value is None:
         value = ""
     if not isinstance(value, str):
         raise SkeinError("invalid", f"{field} must be text")
     if required and not value.strip():
         raise SkeinError("invalid", f"{field} can't be empty")
-    if len(value) > limit:
+    if limit is not None and len(value) > limit:
         if reject:
             raise SkeinError(
                 "invalid", f"{field} is too long ({len(value)} characters; the limit is {limit})"
@@ -188,7 +189,7 @@ class Skein:
         tid = _ref(task_id)
         row = db.get_task(tid) if tid else None
         if row is None or (not is_point and row["assignee"] != caller):
-            raise SkeinError("not_found", f"no task {tid or '(none)'} for you")
+            raise SkeinError("not_found", f"no task {tid or '(none)'}")
         return row
 
     def _target(self, db: Tx, member: Any) -> str:
@@ -241,14 +242,12 @@ class Skein:
         ]
 
     @staticmethod
-    def _insert_with_id(prefix: str, insert: Callable[[str], None]) -> str:
-        for _ in range(5):
+    def _new_id(prefix: str, taken: Callable[[str], Any]) -> str:
+        """``prefix`` + 10 hex. Called inside a write transaction, so check-then-insert holds."""
+        for _ in range(20):
             new_id = prefix + secrets.token_hex(5)
-            try:
-                insert(new_id)
+            if not taken(new_id):
                 return new_id
-            except sqlite3.IntegrityError:
-                continue
         raise RuntimeError("could not allocate a unique id")
 
     # -- everyone --------------------------------------------------------------
@@ -404,7 +403,8 @@ class Skein:
                 "created": now,
                 "seen_by_asker": 0,
             }
-            ask_id = self._insert_with_id("a_", lambda i: db.insert_ask({**row, "id": i}))
+            ask_id = self._new_id("a_", db.get_ask)
+            db.insert_ask({**row, "id": ask_id})
             return _ask_dict(db.get_ask(ask_id))  # type: ignore[arg-type]
 
     def get_ask(self, caller: str, ask_id: str) -> dict[str, Any]:
@@ -414,7 +414,7 @@ class Skein:
             aid = _ref(ask_id)
             row = db.get_ask(aid) if aid else None
             if row is None or (not is_point and row["asker"] != caller):
-                raise SkeinError("not_found", f"no ask {aid or '(none)'} for you")
+                raise SkeinError("not_found", f"no ask {aid or '(none)'}")
             if row["asker"] == caller and row["status"] == "answered" and not row["seen_by_asker"]:
                 db.update_ask(row["id"], seen_by_asker=1)
             return _ask_dict(row)
@@ -427,8 +427,7 @@ class Skein:
         with self.store.tx() as db:
             self._require_point(db, caller, "assign tasks")
             target = self._target(db, member)
-            title = _text(title, "title", TITLE_MAX + 10_000).strip()
-            title = _clip(" ".join(title.split()), TITLE_MAX)
+            title = _clip(" ".join(_text(title, "title").split()), TITLE_MAX)
             instructions = _text(instructions, "instructions", INSTRUCTIONS_MAX, reject=True)
             row = {
                 "title": title,
@@ -444,7 +443,8 @@ class Skein:
                 "notes": [],
                 "seen_by_point": 1,
             }
-            task_id = self._insert_with_id("t_", lambda i: db.insert_task({**row, "id": i}))
+            task_id = self._new_id("t_", db.get_task)
+            db.insert_task({**row, "id": task_id})
             return _task_full(db.get_task(task_id))  # type: ignore[arg-type]
 
     def answer(self, caller: str, ask_id: str, text: str) -> dict[str, Any]:
