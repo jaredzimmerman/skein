@@ -77,3 +77,5 @@
 2026-11-11T07:37:16Z | T16: result written
 2026-11-11T07:40:29Z | T16: review r1 approve
 2026-11-11T07:40:38Z | T16: review r1 approve
+2026-11-11T07:41:10Z | done T16 opus r1 (fable approve, 364 passed), T17 haiku r1
+2026-11-11T07:41:10Z | T16 T17 done

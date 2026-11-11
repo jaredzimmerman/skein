@@ -267,8 +267,8 @@ approved 2026-11-10; pushed every checkpoint) · Author: Jared Zimmerman, no AI 
 | T13 | OAuth sign-in (C8): store v2 + migration, provider, consent, CLI clients, wiring + tests | opus | T12 | src/skein/{oauth,store,service,config,app,auth,cli}.py, skein.example.toml, tests/test_oauth.py (+ existing tests kept green) | `uv run pytest -q` | done |
 | T14 | Docs for OAuth | haiku | T13 | README.md, docs/architecture.md, deploy/nginx.conf.example, deploy/Caddyfile.example, agents/_template/README.md | `grep -c 'oauth' README.md` ≥3 | done |
 | T15 | Re-review OAuth + live-style smoke | fable | T13,T14 | – | `uv run pytest -q` | done (changes → T16, T17) |
-| T16 | OAuth fixes from T15: Basic client auth shim, revoke without secret, consent hand-back page, /register 400, loopback redirect checks | opus | T15 | src/skein/oauth.py, src/skein/service.py, tests/test_oauth.py | `uv run pytest -q` | todo |
-| T17 | OAuth doc fixes from T15 | haiku | T15 | agents/claude/README.md, README.md | `grep -c 'does not do OAuth' agents/claude/README.md` prints 0 | todo |
+| T16 | OAuth fixes from T15: Basic client auth shim, revoke without secret, consent hand-back page, /register 400, loopback redirect checks | opus | T15 | src/skein/oauth.py, src/skein/service.py, tests/test_oauth.py | `uv run pytest -q` | done |
+| T17 | OAuth doc fixes from T15 | haiku | T15 | agents/claude/README.md, README.md | `grep -c 'does not do OAuth' agents/claude/README.md` prints 0 | done |
 
 Status values: todo · in-progress · review · done · blocked:human · escalated
 Out of scope for v1: migrating the live bridge queue.db, PyPI publishing. A private deployment is approved (after T07); its details stay out of the repo.
