@@ -812,3 +812,39 @@ def test_disabled_member_listed_as_disabled(skein, crew):
     skein.set_disabled(B, True)
     flags = {m["name"]: m["disabled"] for m in skein.list_members()}
     assert flags == {POINT: False, A: False, B: True}
+
+
+# -- T10 rule fixes ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["server", "point", "all", "skein"])
+def test_add_member_rejects_reserved_names(skein, name):
+    with refused("invalid"):
+        skein.add_member(name)
+
+
+def test_set_disabled_refuses_current_point(skein, crew):
+    with refused("conflict") as ei:
+        skein.set_disabled(POINT, True)
+    assert "move the point first (skein point set NAME)" in str(ei.value)
+    assert skein.set_disabled(POINT, False)["disabled"] is False
+    assert skein.set_disabled(A, True)["disabled"] is True
+
+
+def test_submit_replacing_open_result_notes_it_once(skein, crew):
+    tid = new_task(skein, A)["id"]
+    skein.submit(A, tid, "Which day?", status="needs_input")
+    skein.follow_up(POINT, tid, "Friday.")
+    out = skein.submit(A, tid, "Booked for Friday.")
+    replaced = [n for n in out["notes"] if n["from"] == "server"]
+    assert len(replaced) == 1
+    assert replaced[0]["text"] == "result replaced; previous: Which day?"
+
+
+def test_submit_replacing_final_result_adds_exactly_one_server_note(skein, crew):
+    tid = new_task(skein, A)["id"]
+    skein.submit(A, tid, "v1")
+    out = skein.submit(A, tid, "v2")
+    assert [n["text"] for n in out["notes"] if n["from"] == "server"] == [
+        "result amended; previous: v1"
+    ]

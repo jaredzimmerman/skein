@@ -33,3 +33,4 @@
 2026-11-11T05:45:38Z | review-fail T07 fable: 1 high (public ladder notes), 2 medium (token in access log, config types), lows → T08-T12
 2026-11-11T05:45:38Z | started wave3 workflow runId=wf_336b6976-108 scriptPath=<local session dir> (T08 haiku→T09 opus, T10 sonnet, T11 haiku, then T12 fable)
 2026-11-11T05:45:39Z | wave3 started
+2026-11-11T05:46:36Z | T10: reserved names, point-disable guard, result-replaced note

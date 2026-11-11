@@ -40,6 +40,7 @@ ANSWER_MAX = 50_000        # truncate
 DISPLAY_MAX = 100          # truncate
 NOTES_KEPT = 50
 AMEND_PREVIEW = 1500
+RESERVED_NAMES = frozenset({"server", "point", "all", "skein"})
 AMEND_WINDOW = 7 * 24 * 3600.0
 LIST_MAX = 100
 INBOX_MAX = 25
@@ -356,9 +357,10 @@ class Skein:
                 )
             self._accepts_changes(row, now, "results")
             notes = row["notes"]
-            if row["status"] in FINAL and row["result"]:
+            if row["result"]:
+                verb = "amended" if row["status"] in FINAL else "replaced"
                 notes = _append_note(
-                    notes, now, SERVER, "result amended; previous: " + row["result"][:AMEND_PREVIEW]
+                    notes, now, SERVER, f"result {verb}; previous: " + row["result"][:AMEND_PREVIEW]
                 )
             fields: dict[str, Any] = {
                 "status": status,
@@ -557,6 +559,8 @@ class Skein:
                 "member names are 2-32 characters: a lowercase letter, then lowercase "
                 "letters, digits, - or _",
             )
+        if name in RESERVED_NAMES:
+            raise SkeinError("invalid", f"{name} is a reserved name; pick another")
         if display is None:
             display = ""
         if not isinstance(display, str):
@@ -581,6 +585,8 @@ class Skein:
     def set_disabled(self, name: str, disabled: bool) -> dict[str, Any]:
         """Disable or re-enable a member. Disabled tokens are refused."""
         with self.store.tx() as db:
+            if disabled and _ref(name) and self._point(db) == name:
+                raise SkeinError("conflict", "move the point first (skein point set NAME)")
             if not db.update_member(_ref(name), disabled=1 if disabled else 0):
                 raise SkeinError("not_found", f"no member named {name}")
         return {"name": name, "disabled": bool(disabled)}

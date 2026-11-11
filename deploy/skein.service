@@ -2,7 +2,7 @@
 #
 # Install (paths are examples; adjust to where the code lives):
 #   sudo useradd --system --home /var/lib/skein --shell /usr/sbin/nologin skein
-#   sudo install -d -o skein -g skein /var/lib/skein
+#   sudo install -d -o skein -g skein -m 0700 /var/lib/skein
 #   sudo install -d -o root -g skein -m 0750 /etc/skein
 #   sudo cp skein.example.toml /etc/skein/skein.toml   # then edit: db and audit_log under /var/lib/skein
 #   sudo chown root:skein /etc/skein/skein.toml && sudo chmod 0640 /etc/skein/skein.toml
@@ -25,6 +25,12 @@ WorkingDirectory=/var/lib/skein
 ExecStart=/opt/skein/.venv/bin/skein --config /etc/skein/skein.toml serve
 Restart=on-failure
 RestartSec=5
+
+# Files skein creates (the database, the audit log) are readable by the skein
+# user only, and the state directory itself is 0700.
+UMask=0077
+StateDirectory=skein
+StateDirectoryMode=0700
 
 # Hardening. The only writable path is the state directory, which holds the
 # SQLite database and the optional audit log.
