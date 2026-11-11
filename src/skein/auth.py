@@ -2,7 +2,9 @@
 
 :class:`AuthMiddleware` turns the presented token into a member name and puts
 it in the ASGI scope (``scope["skein.member"]``), where REST handlers and MCP
-tools read it per request. Nothing else decides identity.
+tools read it per request. Nothing else decides identity. With OAuth on, the
+``authenticate`` it is given also accepts OAuth access tokens, and 401s point
+clients at the protected-resource metadata (PLAN.md C8).
 
 :class:`Audit` writes one JSON line per request or tool call. It records ids,
 outcomes and the *lengths* of text fields, never their content, and never a
@@ -52,7 +54,8 @@ UA_MAX = 200
 PATH_MAX = 200
 
 UNAUTHORIZED = {"error": "unauthorized"}
-CHALLENGE = {"WWW-Authenticate": 'Bearer realm="skein"'}
+BEARER_CHALLENGE = 'Bearer realm="skein"'
+CHALLENGE = {"WWW-Authenticate": BEARER_CHALLENGE}
 INTERNAL = {"error": "internal error", "code": "internal"}
 
 
@@ -81,8 +84,9 @@ def extract_token(headers: Headers, query_string: bytes, url_tokens: bool) -> st
 class AuthMiddleware:
     """Pure ASGI middleware: every HTTP request except ``open_paths`` needs a member token.
 
-    Failure → 401 ``{"error": "unauthorized"}`` with a ``WWW-Authenticate`` challenge.
-    Unknown tokens and disabled members fail the same way.
+    Failure → 401 ``{"error": "unauthorized"}`` with a ``WWW-Authenticate`` challenge
+    (``challenge``; with OAuth on it adds ``resource_metadata``). Unknown tokens and
+    disabled members fail the same way.
     """
 
     def __init__(
@@ -93,12 +97,14 @@ class AuthMiddleware:
         url_tokens: bool,
         open_paths: frozenset[str],
         audit: Audit,
+        challenge: str = BEARER_CHALLENGE,
     ) -> None:
         self.app = app
         self.authenticate = authenticate
         self.url_tokens = url_tokens
         self.open_paths = open_paths
         self.audit = audit
+        self.challenge = {"WWW-Authenticate": challenge}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("path") in self.open_paths:
@@ -117,7 +123,7 @@ class AuthMiddleware:
                 ua=headers.get("user-agent", "")[:UA_MAX],
                 ip=client[0] if client else None,
             )
-            response = JSONResponse(UNAUTHORIZED, status_code=401, headers=CHALLENGE)
+            response = JSONResponse(UNAUTHORIZED, status_code=401, headers=self.challenge)
             await response(scope, receive, send)
             return
         scope[MEMBER_KEY] = member

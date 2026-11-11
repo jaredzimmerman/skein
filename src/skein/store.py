@@ -13,6 +13,11 @@ Each ``tx()`` opens its own connection and closes it afterwards, so a Store is
 safe to share across threads and processes. Write transactions start with
 ``BEGIN IMMEDIATE`` so a read-check-write in the service cannot interleave with
 another writer. Times are unix floats.
+
+Schema versions (``PRAGMA user_version``): 1 is the queue (members, meta, tasks,
+asks); 2 adds the OAuth tables (clients, pending consent requests, codes,
+tokens). Opening an older file upgrades it in place, inside one transaction;
+the upgrade only adds tables, so v1 rows are untouched.
 """
 
 from __future__ import annotations
@@ -23,9 +28,9 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Any, Iterable, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
-_SCHEMA = """
+_SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS members(
     name TEXT PRIMARY KEY,
     display TEXT NOT NULL,
@@ -72,6 +77,66 @@ CREATE INDEX IF NOT EXISTS asks_status ON asks(status);
 CREATE INDEX IF NOT EXISTS asks_asker_status ON asks(asker, status);
 """
 
+# v2: OAuth sign-in. Secrets, codes and tokens are stored only as SHA-256 hashes.
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS oauth_clients(
+    client_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL,
+    secret_sha256 TEXT,
+    auth_method TEXT NOT NULL,
+    redirect_uris TEXT NOT NULL DEFAULT '[]',
+    created REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_pending(
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    redirect_explicit INTEGER NOT NULL,
+    code_challenge TEXT NOT NULL,
+    state TEXT,
+    scope TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    created REAL NOT NULL,
+    expires REAL NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS oauth_codes(
+    code_sha256 TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    member TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    redirect_explicit INTEGER NOT NULL,
+    code_challenge TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    grant_id TEXT NOT NULL,
+    created REAL NOT NULL,
+    expires REAL NOT NULL,
+    used REAL
+);
+CREATE TABLE IF NOT EXISTS oauth_tokens(
+    token_sha256 TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    member TEXT NOT NULL,
+    grant_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    created REAL NOT NULL,
+    expires REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS oauth_pending_client ON oauth_pending(client_id);
+CREATE INDEX IF NOT EXISTS oauth_codes_client ON oauth_codes(client_id);
+CREATE INDEX IF NOT EXISTS oauth_codes_member ON oauth_codes(member);
+CREATE INDEX IF NOT EXISTS oauth_tokens_client ON oauth_tokens(client_id);
+CREATE INDEX IF NOT EXISTS oauth_tokens_member ON oauth_tokens(member);
+CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens(grant_id);
+"""
+
+# Version reached → DDL that gets there from the version before. Applied in order.
+_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _SCHEMA_V1), (2, _SCHEMA_V2))
+
 _MEMBER_COLS = ("name", "display", "token_sha256", "created", "disabled", "last_seen")
 _MEMBER_UPDATABLE = frozenset({"display", "token_sha256", "disabled", "last_seen"})
 
@@ -89,6 +154,19 @@ _ASK_UPDATABLE = frozenset(_ASK_COLS) - {"id"}
 
 _ORDER_COLS = frozenset({"created", "updated", "finished"})
 
+_CLIENT_COLS = ("client_id", "name", "source", "secret_sha256", "auth_method", "redirect_uris", "created")
+_PENDING_COLS = (
+    "id", "client_id", "redirect_uri", "redirect_explicit", "code_challenge", "state", "scope",
+    "resource", "created", "expires", "attempts",
+)
+_CODE_COLS = (
+    "code_sha256", "client_id", "member", "redirect_uri", "redirect_explicit", "code_challenge",
+    "scope", "resource", "grant_id", "created", "expires", "used",
+)
+_TOKEN_COLS = (
+    "token_sha256", "kind", "client_id", "member", "grant_id", "scope", "resource", "created", "expires",
+)
+
 
 class Store:
     """A skein database file. Construction creates the schema if it is missing."""
@@ -105,23 +183,26 @@ class Store:
         return conn
 
     def init(self) -> None:
-        """Create the database file and schema if needed. Safe to call repeatedly."""
+        """Create the database file and schema, or upgrade an older schema in place.
+
+        Safe to call repeatedly and from several processes at once: the version is read
+        again inside the write transaction, and every statement is ``IF NOT EXISTS``.
+        """
         parent = os.path.dirname(os.path.abspath(self.path))
         os.makedirs(parent, exist_ok=True)
         conn = self._connect()
         try:
             conn.execute("PRAGMA journal_mode=WAL")
-            version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version > SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"{self.path} has schema version {version}; this skein understands "
-                    f"up to {SCHEMA_VERSION}. Upgrade skein."
-                )
+            self._check_version(conn.execute("PRAGMA user_version").fetchone()[0])
             conn.execute("BEGIN IMMEDIATE")
             try:
-                for stmt in _SCHEMA.split(";"):
-                    if stmt.strip():
-                        conn.execute(stmt)
+                version = conn.execute("PRAGMA user_version").fetchone()[0]
+                self._check_version(version)
+                for target, ddl in _MIGRATIONS:
+                    if version < target:
+                        for stmt in ddl.split(";"):
+                            if stmt.strip():
+                                conn.execute(stmt)
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 conn.execute("COMMIT")
             except BaseException:
@@ -129,6 +210,13 @@ class Store:
                 raise
         finally:
             conn.close()
+
+    def _check_version(self, version: int) -> None:
+        if version > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"{self.path} has schema version {version}; this skein understands "
+                f"up to {SCHEMA_VERSION}. Upgrade skein."
+            )
 
     @contextmanager
     def tx(self, write: bool = True) -> Iterator["Tx"]:
@@ -355,3 +443,166 @@ class Tx:
             return self.conn.execute("SELECT COUNT(*) FROM asks").fetchone()[0]
         clause, args = _in("status", statuses)
         return self.conn.execute(f"SELECT COUNT(*) FROM asks WHERE {clause}", args).fetchone()[0]
+
+    # -- oauth clients -----------------------------------------------------------
+
+    def insert_oauth_client(self, row: dict[str, Any]) -> None:
+        values = {**row, "redirect_uris": json.dumps(list(row.get("redirect_uris") or []))}
+        cols = [c for c in _CLIENT_COLS if c in values]
+        self.conn.execute(
+            f"INSERT INTO oauth_clients({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            [values[c] for c in cols],
+        )
+
+    def get_oauth_client(self, client_id: str) -> dict[str, Any] | None:
+        return _client_row(
+            self.conn.execute("SELECT * FROM oauth_clients WHERE client_id = ?", (client_id,)).fetchone()
+        )
+
+    def list_oauth_clients(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT * FROM oauth_clients ORDER BY created, rowid").fetchall()
+        return [_client_row(r) for r in rows]  # type: ignore[misc]
+
+    def count_oauth_clients(self, source: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM oauth_clients WHERE source = ?", (source,)
+        ).fetchone()[0]
+
+    def set_oauth_client_redirect_uris(self, client_id: str, uris: Iterable[str]) -> bool:
+        cur = self.conn.execute(
+            "UPDATE oauth_clients SET redirect_uris = ? WHERE client_id = ?",
+            (json.dumps(list(uris)), client_id),
+        )
+        return cur.rowcount > 0
+
+    def delete_oauth_client(self, client_id: str) -> int:
+        """Remove a client and every pending request, code and token that names it.
+        Returns the number of tokens removed."""
+        self.conn.execute("DELETE FROM oauth_pending WHERE client_id = ?", (client_id,))
+        self.conn.execute("DELETE FROM oauth_codes WHERE client_id = ?", (client_id,))
+        tokens = self.conn.execute("DELETE FROM oauth_tokens WHERE client_id = ?", (client_id,)).rowcount
+        self.conn.execute("DELETE FROM oauth_clients WHERE client_id = ?", (client_id,))
+        return tokens
+
+    def delete_idle_oauth_clients(self, source: str, created_before: float) -> int:
+        """Remove clients of ``source`` created before the time that hold no code or token."""
+        ids = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT client_id FROM oauth_clients c WHERE source = ? AND created < ? "
+                "AND NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.client_id = c.client_id) "
+                "AND NOT EXISTS (SELECT 1 FROM oauth_codes k WHERE k.client_id = c.client_id)",
+                (source, created_before),
+            ).fetchall()
+        ]
+        for client_id in ids:
+            self.delete_oauth_client(client_id)
+        return len(ids)
+
+    def count_oauth_tokens_by_client(self, kind: str, not_expired_at: float) -> dict[str, int]:
+        rows = self.conn.execute(
+            "SELECT client_id, COUNT(*) FROM oauth_tokens WHERE kind = ? AND expires >= ? "
+            "GROUP BY client_id",
+            (kind, not_expired_at),
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    # -- oauth pending consent requests -------------------------------------------
+
+    def insert_oauth_pending(self, row: dict[str, Any]) -> None:
+        cols = [c for c in _PENDING_COLS if c in row]
+        self.conn.execute(
+            f"INSERT INTO oauth_pending({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            [row[c] for c in cols],
+        )
+
+    def get_oauth_pending(self, pending_id: str) -> dict[str, Any] | None:
+        return _row(self.conn.execute("SELECT * FROM oauth_pending WHERE id = ?", (pending_id,)).fetchone())
+
+    def set_oauth_pending_attempts(self, pending_id: str, attempts: int) -> bool:
+        cur = self.conn.execute(
+            "UPDATE oauth_pending SET attempts = ? WHERE id = ?", (attempts, pending_id)
+        )
+        return cur.rowcount > 0
+
+    def delete_oauth_pending(self, pending_id: str) -> bool:
+        return self.conn.execute("DELETE FROM oauth_pending WHERE id = ?", (pending_id,)).rowcount > 0
+
+    def trim_oauth_pending(self, keep: int) -> int:
+        """Delete the oldest pending requests so at most ``keep`` remain."""
+        cur = self.conn.execute(
+            "DELETE FROM oauth_pending WHERE id NOT IN "
+            "(SELECT id FROM oauth_pending ORDER BY created DESC, rowid DESC LIMIT ?)",
+            (max(0, int(keep)),),
+        )
+        return cur.rowcount
+
+    # -- oauth codes ----------------------------------------------------------------
+
+    def insert_oauth_code(self, row: dict[str, Any]) -> None:
+        cols = [c for c in _CODE_COLS if c in row]
+        self.conn.execute(
+            f"INSERT INTO oauth_codes({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            [row[c] for c in cols],
+        )
+
+    def get_oauth_code(self, code_sha256: str) -> dict[str, Any] | None:
+        return _row(
+            self.conn.execute("SELECT * FROM oauth_codes WHERE code_sha256 = ?", (code_sha256,)).fetchone()
+        )
+
+    def mark_oauth_code_used(self, code_sha256: str, used: float) -> bool:
+        """Set ``used`` if it is not set yet. False if the code is gone or already used."""
+        cur = self.conn.execute(
+            "UPDATE oauth_codes SET used = ? WHERE code_sha256 = ? AND used IS NULL", (used, code_sha256)
+        )
+        return cur.rowcount > 0
+
+    # -- oauth tokens ---------------------------------------------------------------
+
+    def insert_oauth_token(self, row: dict[str, Any]) -> None:
+        cols = [c for c in _TOKEN_COLS if c in row]
+        self.conn.execute(
+            f"INSERT INTO oauth_tokens({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            [row[c] for c in cols],
+        )
+
+    def get_oauth_token(self, token_sha256: str) -> dict[str, Any] | None:
+        """A token row joined with its member's ``disabled`` flag (NULL if the member is gone)."""
+        return _row(
+            self.conn.execute(
+                "SELECT t.*, m.disabled AS member_disabled FROM oauth_tokens t "
+                "LEFT JOIN members m ON m.name = t.member WHERE t.token_sha256 = ?",
+                (token_sha256,),
+            ).fetchone()
+        )
+
+    def delete_oauth_token(self, token_sha256: str) -> bool:
+        return self.conn.execute(
+            "DELETE FROM oauth_tokens WHERE token_sha256 = ?", (token_sha256,)
+        ).rowcount > 0
+
+    def delete_oauth_grant(self, grant_id: str) -> int:
+        """Delete every token issued under one grant (one approved consent)."""
+        return self.conn.execute("DELETE FROM oauth_tokens WHERE grant_id = ?", (grant_id,)).rowcount
+
+    def delete_oauth_member(self, member: str) -> int:
+        """Delete every code and token issued for a member. Returns the number removed."""
+        codes = self.conn.execute("DELETE FROM oauth_codes WHERE member = ?", (member,)).rowcount
+        tokens = self.conn.execute("DELETE FROM oauth_tokens WHERE member = ?", (member,)).rowcount
+        return codes + tokens
+
+    def purge_oauth(self, now: float) -> None:
+        """Drop pending requests, codes and tokens whose ``expires`` has passed."""
+        for table in ("oauth_pending", "oauth_codes", "oauth_tokens"):
+            self.conn.execute(f"DELETE FROM {table} WHERE expires < ?", (now,))
+
+    def count_oauth_pending(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM oauth_pending").fetchone()[0]
+
+
+def _client_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    d = _row(row)
+    if d is not None:
+        d["redirect_uris"] = json.loads(d["redirect_uris"] or "[]")
+    return d

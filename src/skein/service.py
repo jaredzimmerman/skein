@@ -18,7 +18,8 @@ import re
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
+from urllib.parse import urlsplit
 
 from .errors import SkeinError
 from .store import Store, Tx
@@ -49,6 +50,15 @@ TOKEN_MAX = 512
 NAME_RE = re.compile(r"[a-z][a-z0-9_-]{1,31}")
 POINT_KEY = "point"
 SERVER = "server"
+
+# OAuth clients (PLAN.md C8). Grant and token rules live in oauth.py; these are the
+# owner's admin functions and the redirect URI rule both kinds of client share.
+OAUTH_CLI = "cli"          # added by the owner with `skein oauth client add`
+OAUTH_DCR = "dcr"          # registered by the app itself (RFC 7591)
+REDIRECT_URI_MAX = 2000
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+BLOCKED_SCHEMES = frozenset({"javascript", "data", "file", "vbscript", "about", "blob", "ftp", "ws", "wss"})
+_SCHEME_RE = re.compile(r"[a-z][a-z0-9+.-]*")
 
 
 # -- formatting ----------------------------------------------------------------
@@ -143,6 +153,44 @@ def _ref(value: Any) -> str:
 
 def _append_note(notes: list[dict[str, Any]], t: float, frm: str, text: str) -> list[dict[str, Any]]:
     return (list(notes) + [{"t": t, "from": frm, "text": text}])[-NOTES_KEPT:]
+
+
+def is_loopback(host: str | None) -> bool:
+    return (host or "").lower() in LOOPBACK_HOSTS
+
+
+def check_redirect_uri(uri: Any) -> str:
+    """An OAuth redirect URI skein will send codes to, or ``invalid``.
+
+    Allowed: https with a host; http only to a loopback host (RFC 8252 §7.3); a private-use
+    scheme such as ``com.example.app:/cb`` (RFC 8252 §7.1). Refused: fragments (RFC 6749
+    §3.1.2), plain http elsewhere, and schemes a browser would run or read locally.
+    """
+    if not isinstance(uri, str) or not uri or len(uri) > REDIRECT_URI_MAX:
+        raise SkeinError("invalid", "a redirect URI must be a URL of at most 2000 characters")
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in uri):
+        raise SkeinError("invalid", "a redirect URI can't contain spaces or control characters")
+    if "#" in uri:
+        raise SkeinError("invalid", "a redirect URI can't have a #fragment")
+    try:
+        parts = urlsplit(uri)
+        host = parts.hostname
+    except ValueError:
+        raise SkeinError("invalid", f"not a valid redirect URI: {uri[:100]}") from None
+    scheme = parts.scheme.lower()
+    if not _SCHEME_RE.fullmatch(scheme) or not (parts.netloc or parts.path):
+        raise SkeinError("invalid", f"not a valid redirect URI: {uri[:100]}")
+    if scheme in BLOCKED_SCHEMES:
+        raise SkeinError("invalid", f"redirect URIs can't use {scheme}:")
+    if scheme == "https" and not host:
+        raise SkeinError("invalid", "an https redirect URI needs a host")
+    if scheme == "http" and not is_loopback(host):
+        raise SkeinError(
+            "invalid", "a redirect URI must use https (plain http only to localhost or 127.0.0.1)"
+        )
+    if parts.username is not None or parts.password is not None:
+        raise SkeinError("invalid", "a redirect URI can't contain credentials")
+    return uri
 
 
 class Skein:
@@ -575,20 +623,25 @@ class Skein:
         return {"name": name, "display": display, "token": token}
 
     def rotate_token(self, name: str) -> dict[str, Any]:
-        """Replace a member's token; the old one stops working at once."""
+        """Replace a member's token; the old one stops working at once, and so does every
+        OAuth sign-in made with it (codes and tokens)."""
         token = new_token()
         with self.store.tx() as db:
             if not db.update_member(_ref(name), token_sha256=hash_token(token)):
                 raise SkeinError("not_found", f"no member named {name}")
+            db.delete_oauth_member(name)
         return {"name": name, "token": token}
 
     def set_disabled(self, name: str, disabled: bool) -> dict[str, Any]:
-        """Disable or re-enable a member. Disabled tokens are refused."""
+        """Disable or re-enable a member. Disabled tokens are refused. Disabling also ends
+        the member's OAuth sign-ins for good: re-enabling does not bring them back."""
         with self.store.tx() as db:
             if disabled and _ref(name) and self._point(db) == name:
                 raise SkeinError("conflict", "move the point first (skein point set NAME)")
             if not db.update_member(_ref(name), disabled=1 if disabled else 0):
                 raise SkeinError("not_found", f"no member named {name}")
+            if disabled:
+                db.delete_oauth_member(name)
         return {"name": name, "disabled": bool(disabled)}
 
     def set_point(self, name: str) -> dict[str, Any]:
@@ -622,6 +675,62 @@ class Skein:
                 "open_tasks": db.count_tasks(statuses=OPEN),
                 "open_asks": db.count_asks(statuses=("open",)),
             }
+
+    # -- OAuth clients (admin) -------------------------------------------------
+
+    def add_oauth_client(self, name: str, redirect_uris: Iterable[str] = ()) -> dict[str, Any]:
+        """Pre-register an OAuth client for an app that takes a client id and secret.
+
+        The secret is returned once and only its hash is kept. With no redirect URIs the
+        client locks to the first https redirect URI used in an approved sign-in.
+        """
+        if not isinstance(name, str) or not name.strip():
+            raise SkeinError("invalid", "an OAuth client needs a name")
+        name = _clip(" ".join(name.split()), DISPLAY_MAX)
+        uris = list(dict.fromkeys(check_redirect_uri(u) for u in (redirect_uris or ())))
+        secret = secrets.token_hex(32)
+        now = self._now()
+        with self.store.tx() as db:
+            client_id = self._new_id("cli_", db.get_oauth_client)
+            db.insert_oauth_client(
+                {
+                    "client_id": client_id,
+                    "name": name,
+                    "source": OAUTH_CLI,
+                    "secret_sha256": hash_token(secret),
+                    "auth_method": "client_secret_post",
+                    "redirect_uris": uris,
+                    "created": now,
+                }
+            )
+        return {"client_id": client_id, "client_secret": secret, "name": name, "redirect_uris": uris}
+
+    def list_oauth_clients(self) -> list[dict[str, Any]]:
+        """Every OAuth client (never its secret), with how many sign-ins are still live."""
+        now = self._now()
+        with self.store.tx(write=False) as db:
+            live = db.count_oauth_tokens_by_client("refresh", now)
+            return [
+                {
+                    "client_id": c["client_id"],
+                    "name": c["name"],
+                    "source": c["source"],
+                    "redirect_uris": c["redirect_uris"],
+                    "created": iso(c["created"]),
+                    "sign_ins": live.get(c["client_id"], 0),
+                }
+                for c in db.list_oauth_clients()
+            ]
+
+    def remove_oauth_client(self, client_id: str) -> dict[str, Any]:
+        """Remove an OAuth client and revoke everything issued to it."""
+        cid = _ref(client_id)
+        with self.store.tx() as db:
+            row = db.get_oauth_client(cid) if cid else None
+            if row is None:
+                raise SkeinError("not_found", f"no OAuth client {cid or '(none)'}")
+            revoked = db.delete_oauth_client(cid)
+        return {"client_id": cid, "name": row["name"], "tokens_revoked": revoked}
 
     def authenticate(self, token: Any) -> str | None:
         """Token → member name, or None if unknown or the member is disabled."""

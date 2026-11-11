@@ -13,6 +13,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 ENV_VAR = "SKEIN_CONFIG"
 DEFAULT_FILE = "./skein.toml"
@@ -30,6 +31,18 @@ class Config:
     audit_log: str = ""
     owner: str = "the user"
     answer_time: str = "within about an hour"
+    public_url: str = ""
+    oauth_enabled: bool = False
+    oauth_access_token_ttl: int = 3600
+    oauth_refresh_token_ttl: int = 2592000
+
+    def __post_init__(self) -> None:
+        # Cross-key checks run however the Config is built (loader or code).
+        _validate_public_url(self.public_url, self.base_path)
+        if self.oauth_enabled and not self.public_url:
+            raise ValueError(
+                'oauth.enabled = true needs server.public_url (e.g. "https://skein.example.com/skein")'
+            )
 
 
 # TOML section -> {TOML key: Config field name}
@@ -41,6 +54,7 @@ _SCHEMA: dict[str, dict[str, str]] = {
         "public_hosts": "public_hosts",
         "allowed_origins": "allowed_origins",
         "url_tokens": "url_tokens",
+        "public_url": "public_url",
     },
     "storage": {
         "db": "db",
@@ -50,7 +64,19 @@ _SCHEMA: dict[str, dict[str, str]] = {
         "owner": "owner",
         "answer_time": "answer_time",
     },
+    "oauth": {
+        "enabled": "oauth_enabled",
+        "access_token_ttl": "oauth_access_token_ttl",
+        "refresh_token_ttl": "oauth_refresh_token_ttl",
+    },
 }
+
+BOOL_KEYS = frozenset({"url_tokens", "enabled"})
+TTL_KEYS = frozenset({"access_token_ttl", "refresh_token_ttl"})
+TTL_MIN = 60
+TTL_MAX = 365 * 24 * 3600
+# Hosts that may use plain http in public_url (the MCP SDK's issuer rule).
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1"})
 
 
 def _validate_base_path(value: str) -> str:
@@ -65,6 +91,34 @@ def _validate_base_path(value: str) -> str:
     return value
 
 
+def _validate_public_url(value: str, base_path: str) -> str:
+    """``public_url`` is "" or the absolute URL clients use, ending in ``base_path``."""
+    if value == "":
+        return value
+    example = '(e.g. "https://skein.example.com/skein")'
+    try:
+        parts = urlsplit(value)
+        host = parts.hostname
+    except ValueError:
+        raise ValueError(f"server.public_url is not a URL {example}: {value!r}") from None
+    if parts.scheme not in ("https", "http") or not host:
+        raise ValueError(f"server.public_url must be an http(s) URL {example}: {value!r}")
+    if parts.scheme == "http" and host not in LOOPBACK_HOSTS:
+        raise ValueError(f"server.public_url must use https (http only for localhost): {value!r}")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError(f"server.public_url must not contain credentials: {value!r}")
+    if parts.query or parts.fragment or "?" in value or "#" in value:
+        raise ValueError(f"server.public_url must not have a query or fragment: {value!r}")
+    if value.endswith("/"):
+        raise ValueError(f'server.public_url must not end with "/": {value!r}')
+    if parts.path != base_path:
+        raise ValueError(
+            f"server.public_url must end with server.base_path ({base_path or 'empty'}); "
+            f"its path is {parts.path or 'empty'}: {value!r}"
+        )
+    return value
+
+
 def _check_value(section: str, key: str, value: Any) -> Any:
     """Type-check one value by its key. Raises ValueError naming section.key."""
     where = f"{section}.{key}"
@@ -76,9 +130,16 @@ def _check_value(section: str, key: str, value: Any) -> Any:
             raise ValueError(f"{where} must be between 1 and 65535, got {value!r}")
         return value
 
-    if key == "url_tokens":
+    if key in BOOL_KEYS:
         if not isinstance(value, bool):
             raise ValueError(f"{where} must be true or false, got {value!r}")
+        return value
+
+    if key in TTL_KEYS:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{where} must be a whole number of seconds, got {value!r}")
+        if not TTL_MIN <= value <= TTL_MAX:
+            raise ValueError(f"{where} must be between {TTL_MIN} and {TTL_MAX} seconds, got {value!r}")
         return value
 
     if key in ("public_hosts", "allowed_origins"):

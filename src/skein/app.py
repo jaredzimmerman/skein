@@ -6,7 +6,12 @@
 <base_path>/api/...   REST (see :mod:`skein.rest`)
 ```
 
-Everything except healthz needs a member token (:class:`~skein.auth.AuthMiddleware`).
+With ``[oauth] enabled`` it also serves OAuth sign-in (see :mod:`skein.oauth`): metadata
+under ``/.well-known/…`` (root, path-inserted) and ``<base_path>/.well-known/…``, and
+``<base_path>/{authorize,token,register,revoke,oauth/consent}``. Those need no token.
+
+Everything else needs a member token or an OAuth access token
+(:class:`~skein.auth.AuthMiddleware`).
 FastMCP's session manager runs inside this app's lifespan: requests to /mcp
 fail until the lifespan has started.
 """
@@ -27,9 +32,10 @@ from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from . import __version__
-from .auth import Audit, AuthMiddleware, member_of
+from .auth import BEARER_CHALLENGE, Audit, AuthMiddleware, member_of
 from .config import Config
 from .mcp_tools import build_mcp
+from .oauth import SkeinOAuth
 from .rest import ROUTES, error_response, routes as rest_routes
 from .service import Skein
 
@@ -74,6 +80,8 @@ class McpEndpoint:
         auth = "Authorization: Bearer <token>, or X-API-Key: <token>"
         if self.config.url_tokens:
             auth += ", or ?token=<token> in the URL"
+        if self.config.oauth_enabled:
+            auth += f"; OAuth clients sign in through {self.config.public_url} (scope skein)"
         return {
             "service": "skein",
             "version": __version__,
@@ -110,6 +118,7 @@ def create_app(config: Config, skein: Skein | None = None) -> Starlette:
         skein = Skein(config.db)
     audit = Audit(config.audit_log)
     base = config.base_path
+    oauth = SkeinOAuth(skein, config, audit) if config.oauth_enabled else None
     mcp = build_mcp(skein, config, audit)
     mcp.streamable_http_app()  # creates mcp.session_manager; its routes are not used
     mcp_endpoint = McpEndpoint(mcp, config)
@@ -125,14 +134,16 @@ def create_app(config: Config, skein: Skein | None = None) -> Starlette:
             Route(f"{base}/mcp", mcp_endpoint),
             Route(f"{base}/mcp/", mcp_endpoint),
             *rest_routes(skein, audit, f"{base}/api"),
+            *(oauth.routes() if oauth else []),
         ],
         middleware=[
             Middleware(
                 AuthMiddleware,
-                authenticate=skein.authenticate,
+                authenticate=oauth.authenticate if oauth else skein.authenticate,
                 url_tokens=config.url_tokens,
-                open_paths=frozenset({f"{base}/healthz"}),
+                open_paths=frozenset({f"{base}/healthz"}) | (oauth.open_paths() if oauth else frozenset()),
                 audit=audit,
+                challenge=oauth.challenge if oauth else BEARER_CHALLENGE,
             )
         ],
         exception_handlers={404: _http_error, 405: _http_error},
@@ -141,4 +152,5 @@ def create_app(config: Config, skein: Skein | None = None) -> Starlette:
     app.state.skein = skein
     app.state.config = config
     app.state.mcp = mcp
+    app.state.oauth = oauth
     return app

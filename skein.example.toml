@@ -15,6 +15,9 @@ public_hosts = []
 allowed_origins = []
 # Also accept ?token=... for clients that cannot send headers. Leave false if you can.
 url_tokens = false
+# The URL clients use to reach this server: scheme, host, then exactly base_path, no trailing
+# slash, e.g. "https://skein.example.com/skein". Needed when [oauth] enabled = true.
+public_url = ""
 
 [storage]
 # SQLite database file.
@@ -27,3 +30,13 @@ audit_log = ""
 owner = "the user"
 # What members are told about how quickly the point responds.
 answer_time = "within about an hour"
+
+[oauth]
+# Let MCP clients that only connect through OAuth sign in as a member: the person signing in
+# pastes that member's token once on skein's consent page. Fixed member tokens keep working
+# either way. Needs server.public_url.
+enabled = false
+# Lifetime of an OAuth access token, in seconds.
+access_token_ttl = 3600
+# Lifetime of an OAuth refresh token, in seconds (30 days). Each refresh issues a new one.
+refresh_token_ttl = 2592000

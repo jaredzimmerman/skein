@@ -79,10 +79,10 @@ def test_skein_error_codes_and_dict():
 # -- store ---------------------------------------------------------------------
 
 
-def test_store_creates_wal_schema_version_1(store, db_path):
+def test_store_creates_wal_schema_version_2(store, db_path):
     conn = sqlite3.connect(db_path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"members", "meta", "tasks", "asks"} <= tables

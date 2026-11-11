@@ -16,6 +16,7 @@ from skein.errors import SkeinError
 from skein.service import Skein
 
 TOKEN_WARNING = "Warning: this token will not be shown again. Store it now."
+SECRET_WARNING = "Warning: this secret will not be shown again. Store it now."
 
 
 def _open(cfg: Config) -> Skein:
@@ -93,6 +94,42 @@ def _cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_oauth_client_add(cfg: Config, args: argparse.Namespace) -> int:
+    result = _open(cfg).add_oauth_client(args.name, args.redirect_uri or [])
+    print(f"Added OAuth client {result['name']}.")
+    print(f"client_id: {result['client_id']}")
+    print(f"client_secret: {result['client_secret']}")
+    print(SECRET_WARNING)
+    if result["redirect_uris"]:
+        print("Redirect URIs: " + " ".join(result["redirect_uris"]))
+    else:
+        print("Redirect URIs: none yet; the first https redirect URI used in an approved sign-in locks it.")
+    if not cfg.oauth_enabled:
+        print("Note: OAuth is off in this config ([oauth] enabled = false); sign-in won't work until it's on.")
+    return 0
+
+
+def _cmd_oauth_client_list(cfg: Config, args: argparse.Namespace) -> int:
+    clients = _open(cfg).list_oauth_clients()
+    if not clients:
+        print("No OAuth clients yet. Add one with: skein oauth client add NAME")
+        return 0
+    print(f"{'CLIENT ID':<38} {'NAME':<20} {'SOURCE':<7} {'SIGN-INS':<9} {'CREATED':<21} REDIRECT URIS")
+    for c in clients:
+        uris = " ".join(c["redirect_uris"]) or "(locks on first sign-in)"
+        print(
+            f"{c['client_id']:<38} {c['name'] or '-':<20} {c['source']:<7} {c['sign_ins']:<9} "
+            f"{c['created'] or '':<21} {uris}"
+        )
+    return 0
+
+
+def _cmd_oauth_client_remove(cfg: Config, args: argparse.Namespace) -> int:
+    result = _open(cfg).remove_oauth_client(args.client_id)
+    print(f"Removed OAuth client {result['client_id']} and revoked its tokens ({result['tokens_revoked']}).")
+    return 0
+
+
 def _cmd_serve(cfg: Config, args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -134,6 +171,24 @@ def _build_parser() -> argparse.ArgumentParser:
     pset.add_argument("name")
     pset.set_defaults(func=_cmd_point_set)
     point.add_parser("show", help="show the point").set_defaults(func=_cmd_point_show)
+
+    oauth = sub.add_parser("oauth", help="manage OAuth sign-in").add_subparsers(
+        dest="oauth_cmd", required=True, metavar="ACTION"
+    )
+    client = oauth.add_parser("client", help="manage OAuth clients").add_subparsers(
+        dest="client_cmd", required=True, metavar="ACTION"
+    )
+    cadd = client.add_parser("add", help="pre-register a client and print its id and secret")
+    cadd.add_argument("name")
+    cadd.add_argument(
+        "--redirect-uri", action="append", metavar="URI",
+        help="allowed redirect URI (repeatable); without one, the first https URI used locks it",
+    )
+    cadd.set_defaults(func=_cmd_oauth_client_add)
+    client.add_parser("list", help="list OAuth clients").set_defaults(func=_cmd_oauth_client_list)
+    cremove = client.add_parser("remove", help="remove a client and revoke its tokens")
+    cremove.add_argument("client_id")
+    cremove.set_defaults(func=_cmd_oauth_client_remove)
 
     sub.add_parser("status", help="show the point, members and open counts").set_defaults(func=_cmd_status)
     sub.add_parser("serve", help="run the server").set_defaults(func=_cmd_serve)
