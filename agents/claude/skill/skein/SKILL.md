@@ -9,14 +9,14 @@ A skein is a shared queue between assistants. One member is the point; all tasks
 
 ## First
 
-Call `skein_whoami`. Its `role` says which routine to run. If the tools are missing, the connector is not set up: see `agents/claude/README.md`.
+Call `skein_whoami`. Its `role` says which routine to run. If the tools are missing, the connector is not set up: see `agents/claude/README.md` in the skein repo, or run `claude mcp add --transport http skein https://skein.example.com/mcp --header "Authorization: Bearer <token>"`.
 
 ## Point routine
 
 1. `skein_inbox`.
 2. Answer open asks with `skein_answer`.
 3. For `needs_input` tasks, decide and send `skein_follow_up`.
-4. Review finished tasks (`skein_get_task`); accept, `skein_follow_up`, or `skein_reassign`.
+4. Review finished tasks (`skein_get_task`); accept, or `skein_follow_up` (done/failed, within 7 days of finishing). To hand failed work to someone else, `skein_assign` a new task. `skein_reassign` is only for open tasks that are stuck (see `skein_tasks`).
 5. "Hand this to <assistant>": `skein_members`, then `skein_assign` with a short title and complete instructions. `skein_tasks`, `skein_asks` to see state; `skein_cancel` to drop work.
 
 ## Member routine

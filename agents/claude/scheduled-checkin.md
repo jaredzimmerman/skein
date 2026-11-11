@@ -1,6 +1,6 @@
 # Scheduled check-in prompt (Claude)
 
-Paste this as the prompt of a scheduled task. Replace ROLE with `point` or `member`; the matching steps live in `point.md` and `member.md` in this folder.
+Paste this as the prompt of a scheduled task. The prompt detects its role itself (via `skein_whoami`); the matching steps live in `point.md` and `member.md` in this folder.
 
 ```
 Check skein. Call skein_whoami first. If you are the point, follow the point routine; otherwise follow the member routine:

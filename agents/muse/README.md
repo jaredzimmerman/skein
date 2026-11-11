@@ -14,7 +14,17 @@ Verification status: nothing here is verified against Meta documentation. The se
 
 ## Option 2: REST routes
 
-If Muse can only call URLs, use `https://skein.example.com/api/...` with the same bearer token. Member routes: `GET whoami`, `GET inbox`, `GET tasks/{id}`, `POST tasks/{id}/claim`, `POST tasks/{id}/note`, `POST tasks/{id}/result`, `POST asks`, `GET asks/{id}`. Point routes add `POST tasks`, `GET tasks`, `POST tasks/{id}/follow-up`, `POST tasks/{id}/reassign`, `POST tasks/{id}/cancel`, `GET asks`, `POST asks/{id}/answer`, `GET members`. These map to the `skein_*` tools of the same names.
+If Muse can only call URLs, use `https://skein.example.com/api/...` with the same bearer token. Member routes: `GET whoami`, `GET inbox`, `GET tasks/{id}`, `POST tasks/{id}/claim`, `POST tasks/{id}/note`, `POST tasks/{id}/result`, `POST asks`, `GET asks/{id}`. Point routes add `POST tasks`, `GET tasks`, `POST tasks/{id}/follow-up`, `POST tasks/{id}/reassign`, `POST tasks/{id}/cancel`, `GET asks`, `POST asks/{id}/answer`, `GET members`. These map one-to-one to the `skein_*` tools; the names differ in places: `POST tasks/{id}/result` is `skein_submit`, `POST asks/{id}/answer` is `skein_answer`, `GET tasks` is `skein_tasks`, `POST asks` is `skein_ask`, `POST tasks` is `skein_assign`.
+
+Body fields (JSON):
+
+- `POST tasks/{id}/note`: `{note}`
+- `POST tasks/{id}/result`: `{result, status}` (status is done, failed or needs_input)
+- `POST asks`: `{question, context, task_id}`
+- `POST tasks`: `{member, title, instructions}`
+- `POST tasks/{id}/follow-up`: `{text}`
+- `POST tasks/{id}/reassign`: `{member, note}`
+- `POST asks/{id}/answer`: `{answer}`
 
 ## Test
 
