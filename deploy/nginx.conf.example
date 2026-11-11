@@ -24,6 +24,17 @@ server {
     ssl_certificate     /etc/letsencrypt/live/skein.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/skein.example.com/privkey.pem;
 
+    # OAuth discovery (needed only when [oauth] enabled = true). The metadata
+    # paths sit at the root, with base_path appended, so they are forwarded
+    # even when base_path is set. Harmless when OAuth is off.
+    location ~ ^/\.well-known/(oauth-authorization-server|openid-configuration|oauth-protected-resource)(/|$) {
+        proxy_pass http://127.0.0.1:8771;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     # skein answers with plain JSON. Buffering is off so each response passes
     # through as soon as skein sends it; long timeouts cover slow tool calls.
     location /mcp {
@@ -51,4 +62,5 @@ server {
 # location blocks with "location /skein/mcp" and "location /skein/", and keep
 # the prefix in the URL: skein serves its routes under base_path, so the
 # request path must still start with /skein/. Do not add a trailing slash to
-# base_path in skein.toml.
+# base_path in skein.toml. Keep the OAuth discovery block above: its paths are
+# at the root, outside the prefix.

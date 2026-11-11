@@ -7,6 +7,7 @@ Copy this folder to `agents/<name>/` and fill in the placeholders.
 - Connector type: <custom connector / MCP config / REST only>. Source: <link to the vendor docs you checked>.
 - URL: `https://skein.example.com/mcp` (REST: `https://skein.example.com/api/...`).
 - Auth: `Authorization: Bearer <token>` (or `X-API-Key`). If the assistant cannot send headers, `url_tokens = true` allows `?token=` but the token then lands in URLs and logs; rotate it often. Turn the reverse proxy's access log off for skein's location, or strip query strings from it, before you use this.
+- OAuth-only connectors: if the assistant's connector only accepts OAuth, enable `[oauth]` in `skein.toml` (with `server.public_url`), use the URL above, and approve the sign-in with this member's token on skein's consent page. See the README's OAuth sign-in section. Fixed tokens are not needed for that connector.
 - Steps in the vendor UI: <write only what you verified; mark the rest "unverified: check X">.
 
 ## Schedule

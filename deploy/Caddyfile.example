@@ -10,15 +10,24 @@ skein.example.com {
     # off, so each response reaches the client as soon as skein sends it.
     # Logs: Caddy writes no access log until you add a log directive. If you add
     # one while url_tokens is on, leave the query string out of it.
+    # This catch-all also forwards the OAuth discovery paths under /.well-known/.
     reverse_proxy 127.0.0.1:8771 {
         flush_interval -1
     }
 }
 
 # If skein runs under a path prefix (base_path = "/skein"), use "handle" rather
-# than "handle_path", because handle_path strips the prefix and skein expects it:
+# than "handle_path", because handle_path strips the prefix and skein expects it.
+# The OAuth discovery paths sit at the root, outside the prefix, so they get
+# their own handle block (needed only when [oauth] enabled = true):
 #
 #   skein.example.com {
+#       @oauth_discovery path /.well-known/oauth-authorization-server* /.well-known/openid-configuration* /.well-known/oauth-protected-resource*
+#       handle @oauth_discovery {
+#           reverse_proxy 127.0.0.1:8771 {
+#               flush_interval -1
+#           }
+#       }
 #       handle /skein/* {
 #           reverse_proxy 127.0.0.1:8771 {
 #               flush_interval -1

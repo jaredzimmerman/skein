@@ -62,3 +62,4 @@
 2026-11-11T07:06:22Z | T13: fix round 2 - resolve consent token inside the code-issuing transaction; example redirect scheme
 2026-11-11T07:07:01Z | T13: fix round 2 result
 2026-11-11T07:09:30Z | T13: review r2 approve
+2026-11-11T07:12:12Z | T14: docs for OAuth (README, architecture, proxy examples, agent template)

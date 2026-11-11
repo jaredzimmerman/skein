@@ -67,7 +67,118 @@ To run the test suite: `uv run pytest -q`.
 `agents/README.md` explains how a member joins: the URL, where the token goes, and what to check
 afterwards. `agents/_template/` is a starting point for a new assistant. `agents/claude/` and
 `agents/muse/` are the two worked examples. Each folder has a `point.md` for when that assistant is
-the point and a `member.md` for when it is a member.
+the point and a `member.md` for when it is a member. A client that can only sign in with OAuth needs
+`[oauth]` turned on first; see OAuth sign-in below.
+
+## OAuth sign-in
+
+Some MCP clients connect only through OAuth and cannot send a bearer token. With OAuth on, skein
+acts as its own OAuth server. The client starts a sign-in, the person approves it on skein's consent
+page with a member's token, and the client gets its own tokens that act as that member. Fixed member
+tokens keep working everywhere. OAuth is off by default, so turn it on only for a client that needs it.
+
+### Config
+
+In `skein.toml`:
+
+```toml
+[server]
+public_url = "https://skein.example.com"   # no trailing slash; must end with base_path
+
+[oauth]
+enabled = true
+access_token_ttl = 3600        # seconds
+refresh_token_ttl = 2592000    # seconds (30 days)
+```
+
+`oauth.enabled = true` needs `server.public_url`, the address clients use: scheme and host, then
+exactly `base_path`. With a path prefix, `public_url` ends with it, for example
+`https://skein.example.com/skein`. It must use https (plain http is accepted only for localhost), and
+it must not have credentials, a query or a fragment. A missing or wrong value stops the server at
+startup with an error that names the key. `enabled` must be `true` or `false`.
+
+With OAuth on, these routes sit under `base_path` and need no token:
+
+- `/authorize`, `/token`, `/register` and `/revoke`, the standard OAuth endpoints.
+- `/oauth/consent`, the sign-in page.
+- Metadata at the root, with the base path appended: `/.well-known/oauth-authorization-server<base_path>`,
+  `/.well-known/openid-configuration<base_path>` and `/.well-known/oauth-protected-resource<base_path>/mcp`.
+  The same metadata is also served under `<base_path>/.well-known/`.
+
+A request to `/mcp` or `/api/` without a valid token gets a 401 whose `WWW-Authenticate` header names
+the protected-resource metadata, so a client can find the sign-in on its own. The reverse proxy must
+forward the root `/.well-known/` paths. Both examples in `deploy/` do.
+
+### How a sign-in works
+
+1. The client sends the person to `/authorize` with PKCE (S256 only) and scope `skein`.
+2. skein keeps the request for 10 minutes and shows the consent page. The page names the client and
+   asks for the skein token of the member the client should act as.
+3. The person pastes that member's token. skein checks it once and does not keep it, log it or echo
+   it back. A valid token of an enabled member sends the person to the client's redirect address with
+   a one-time code, valid for 10 minutes. A wrong token counts as a failed attempt; after five, that
+   sign-in stops and the client must start again. The consent page is sent with `Cache-Control:
+   no-store` and cannot be framed.
+4. The client exchanges the code at `/token` for an access token (`skeino_…`, one hour by default) and
+   a refresh token (`skeinr_…`, 30 days by default). Each refresh issues a new refresh token, and the
+   old one stops working.
+
+An access token acts exactly like that member's fixed token: the same member, the same permissions and
+the same per-request separation from other members. Each token is bound to its member, its client and
+the server's resource, and only a hash is stored.
+
+### Clients
+
+A client gets a client ID in one of two ways.
+
+- **Dynamic registration.** The client registers itself at `/register` (RFC 7591), with no setup.
+  Its redirect addresses must be https, or http on localhost. At most 50 clients can register this
+  way. At the cap, registrations idle for more than a day are removed to make room. Registration is
+  limited to 10 per minute for the whole server; a client over the limit gets 429 with `Retry-After`.
+- **Pre-registered.** The owner adds the client on the server:
+
+  ```bash
+  uv run skein oauth client add NAME --redirect-uri https://client.example.com/callback
+  ```
+
+  The command prints the `client_id` and `client_secret` once. skein keeps only a hash of the secret,
+  and the client sends it at `/token` or `/revoke`, by basic or post authentication. Use this when a
+  client needs a fixed ID and secret, or when you want the redirect addresses fixed in advance.
+
+Redirect addresses are matched exactly; loopback http addresses match any port.
+
+A pre-registered client added without `--redirect-uri` has no redirect address yet. Its first https
+redirect address, used in an approved sign-in, becomes its only one (trust on first use). Until that
+first approved sign-in, skein sends error replies to any https address the request names, so pass
+`--redirect-uri` whenever you know it.
+
+Other client commands:
+
+```bash
+uv run skein oauth client list
+uv run skein oauth client remove CLIENT_ID
+```
+
+`client list` shows each client's ID, name, how it was added, its sign-ins and its redirect addresses.
+`client remove` also revokes every token that client holds.
+
+### What ends access
+
+- `uv run skein member rotate NAME` ends every OAuth grant and unused code for that member, and the
+  old fixed token stops working at once.
+- `uv run skein member disable NAME` ends the same grants and refuses the member until it is enabled
+  again. Enabling it does not restore them; the app has to sign in again.
+- `uv run skein oauth client remove CLIENT_ID` ends every token that client holds, for any member.
+- A client can end its own grant by calling `/revoke` (RFC 7009). That ends the access and refresh
+  tokens together. A refresh token that has already been rotated is refused, but that alone does not
+  end the grant.
+- Using an authorization code a second time ends the grant that code produced.
+- Setting `[oauth] enabled = false` refuses existing OAuth access tokens. Fixed member tokens keep
+  working.
+
+When `storage.audit_log` is set, OAuth events are written too: client registration, each consent
+outcome, token issue, refresh and revoke, a reused code, and a refused registration. They hold ids,
+member names, attempt counts and status, and never tokens, client secrets, codes or verifiers.
 
 ## MCP tools
 
@@ -126,7 +237,8 @@ that is too large) and `conflict` (409).
 
 - **Tokens.** Each member has its own bearer token. The server stores only a SHA-256 hash of it, so
   a copy of the database does not reveal working tokens. The plain token is shown once, when the
-  member is added or rotated. Disabled members are refused even with a valid token.
+  member is added or rotated. Disabled members are refused even with a valid token. OAuth access and
+  refresh tokens and OAuth client secrets are stored as hashes in the same way (see OAuth sign-in).
 - **Headers, not URLs.** Tokens go in an `Authorization: Bearer` header or an `X-API-Key` header.
   The `url_tokens` setting, which also accepts `?token=` in the URL, is off by default. URLs are
   written to access logs, proxy logs, browser history and `Referer` headers, so a token in a URL
@@ -161,8 +273,9 @@ The `deploy/` folder has a systemd unit (`skein.service`) that runs the server a
 `Caddyfile.example`. Both forward to `127.0.0.1:8771` with response buffering off. The unit sets
 `UMask=0077` and a 0700 state directory, so the database and audit log are readable only by the
 `skein` user. Set `public_hosts` and, if you serve under a path, `base_path` in `skein.toml` to
-match your hostname and path. If you use `url_tokens`, keep query strings out of the proxy's
-access log. `docs/architecture.md` describes how the parts fit together.
+match your hostname and path. With OAuth on, set `public_url` to match too, and make sure the proxy
+forwards the root `/.well-known/` metadata paths (both examples do). If you use `url_tokens`, keep
+query strings out of the proxy's access log. `docs/architecture.md` describes how the parts fit together.
 
 ## License
 

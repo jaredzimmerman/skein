@@ -30,6 +30,9 @@ the network.
 - **`tokens.py`** creates and hashes tokens. Tokens are `skein_` plus 32 random URL-safe bytes. Only
   the SHA-256 hash is stored, and a presented token is checked with a constant-time comparison.
 - **`auth.py`** turns a presented token into a member name using `Skein.authenticate`.
+- **`oauth.py`** runs OAuth sign-in when `[oauth] enabled` is on. It wraps the MCP SDK's auth handlers
+  (authorize, token, register, revoke and the metadata) under `base_path`, and owns the consent page,
+  the grant rules and the tokens it issues. It holds no SQL; it reads and writes through `store.py`.
 - **`mcp_tools.py`** exposes the service as MCP tools. Each tool converts a `SkeinError` into an
   `{"error", "code"}` result instead of a transport error.
 - **`rest.py`** exposes the same operations as JSON routes under `/api/`, with the same error codes
@@ -47,7 +50,8 @@ and both transports pick it up.
 
 The member name comes from the token on each request, and it is passed to the MCP tool handlers for
 that request only. Two tokens served by the same process never see each other's identity. A test
-checks this.
+checks this. An OAuth access token goes through the same path: it resolves to the member it was
+issued for, and it is refused once that member is disabled or rotated, or its client is removed.
 
 ## Roles
 
@@ -86,7 +90,13 @@ when an answer arrives and sees it once.
 
 ## Data model
 
-SQLite holds three tables and a small meta table:
+SQLite holds the tables below. The schema is at version 2. A version 1 database, from before OAuth,
+is upgraded in place when it is opened, and keeps its members, tasks and asks.
+
+- `oauth_clients`, `oauth_pending`, `oauth_codes` and `oauth_tokens`: OAuth clients (client secrets
+  stored as hashes), consent requests waiting for a member token, one-time authorization codes
+  (hashed), and access and refresh tokens (hashed). Each code and token is bound to its member,
+  client and resource.
 
 - `members`: name, display name, token hash, creation time, disabled flag and last seen time. The
   names `server`, `point`, `all` and `skein` are reserved and cannot be used for a member.
@@ -114,15 +124,18 @@ and `allowed_origins`. `base_path` must be empty or start with a single `/`. A w
 an error that names the key.
 
 The keys are grouped as `[server]` (host, port, base path, extra allowed hosts, extra allowed
-origins, URL tokens), `[storage]` (database path and audit log path) and `[instance]` (owner name
-and expected answer time). `skein.example.toml` lists them with comments.
+origins, URL tokens, public URL), `[storage]` (database path and audit log path), `[instance]` (owner
+name and expected answer time) and `[oauth]` (enabled, access token lifetime, refresh token lifetime).
+`skein.example.toml` lists them with comments. `oauth.enabled = true` requires `server.public_url`,
+and the public URL must end with `base_path`; a bad combination raises an error that names the key.
 
 ## HTTP surface
 
 - `GET /healthz` returns `ok` without authentication.
 - Everything else requires `Authorization: Bearer <token>` or `X-API-Key: <token>`. A `?token=`
   query parameter is accepted only when `url_tokens` is on. A failed check returns 401 with a
-  `WWW-Authenticate: Bearer realm="skein"` header.
+  `WWW-Authenticate: Bearer realm="skein"` header. With OAuth on, the header also names the
+  protected-resource metadata in `resource_metadata`.
 - `/mcp` runs FastMCP in stateless, JSON-response mode. The server answers with plain JSON and does
   not stream. DNS-rebinding protection is on: the allowed hosts are `public_hosts` plus the local
   loopback names for the configured port. An `Origin` header is allowed only when it matches
@@ -135,6 +148,33 @@ and expected answer time). `skein.example.toml` lists them with comments.
 - `skein serve` runs uvicorn with its access log off. Request lines, and any token in a query
   string, are never written to the server's log.
 
+## OAuth sign-in
+
+With `[oauth] enabled = true` (and `server.public_url` set), skein is also an OAuth 2.1 authorization
+server for the same resource. It uses the MCP SDK's auth handlers and metadata builders, mounted
+under `base_path`, so the endpoints are `<base>/authorize`, `<base>/token`, `<base>/register`,
+`<base>/revoke` and the consent page `<base>/oauth/consent`. Metadata is served at the root with the
+base path appended (RFC 8414 and 9728 style) and under `<base>/.well-known/`. The README's "OAuth
+sign-in" section has the operator steps.
+
+The flow in brief:
+
+- `/authorize` stores a pending request for 10 minutes and redirects to the consent page.
+- The consent page asks the person for a member's skein token. A valid token of an enabled member
+  issues a one-time code, which lasts 10 minutes and is bound to the client, redirect address,
+  PKCE challenge, member and resource. Five wrong tokens stop that pending request.
+- `/token` exchanges the code for `skeino_` access and `skeinr_` refresh tokens. Refresh rotates.
+  A reused code ends the grant it produced.
+- Clients come from dynamic registration (capped at 50, rate limited) or from `skein oauth client
+  add`, which prints a secret once and stores only its hash. A client added without redirect
+  addresses locks to its first approved https redirect address.
+- Rotating a member's token or disabling the member deletes its codes and tokens. Removing a client
+  deletes that client's tokens. The member token is checked in the same write transaction that issues
+  the code, so a rotation or disable that lands during a sign-in leaves no working grant behind.
+
+Only hashes of tokens, codes and client secrets are stored. The member token typed on the consent page
+is checked inside the same write transaction that issues the code, and it is never stored or logged.
+
 ## Audit log
 
 When `storage.audit_log` is set, each REST call, each MCP tool call and each failed sign-in adds
@@ -143,7 +183,9 @@ of each text field. An id is written only when it has the form skein issues (tas
 member names); anything else in an id position is recorded by its length. The text itself is never
 logged. MCP `initialize` and `tools/list`, the help page, and requests to unknown routes or with the wrong method are not
 audited. A failed authentication logs the method, the path (clipped to 200 characters), user agent
-and client address, and never the token.
+and client address, and never the token. With OAuth on, client registration, each consent outcome,
+token issue, refresh and revoke, a reused code and a refused registration are also logged, with ids,
+member names, attempt counts and status only.
 
 ## Running it
 
@@ -152,6 +194,7 @@ One process serves every member. Routine operation uses the CLI against the same
 - `skein init` creates the database.
 - `skein member add|list|rotate|disable|enable` manages members and their tokens.
 - `skein point set|show` manages the point.
+- `skein oauth client add|list|remove` manages OAuth clients (see the README's OAuth sign-in section).
 - `skein status` shows the point, the members, and the number of open tasks and asks.
 - `skein serve` starts the server on the configured host and port. It writes no access log; the
   audit log is the only request record.
