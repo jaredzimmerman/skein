@@ -38,3 +38,4 @@
 2026-11-11T05:47:46Z | T11: docs and deploy fixes from final review
 2026-11-11T05:48:12Z | decision: user approved one history rewrite + force-push of main to remove already-pushed local/account notes; run after wave 3 finishes (agents are committing now)
 2026-11-11T05:48:17Z | T08: strict config types, allowed_origins, explicit-path errors
+2026-11-11T05:48:42Z | T11: review r1 approve
