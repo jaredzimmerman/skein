@@ -71,3 +71,4 @@
 2026-11-11T07:26:07Z | T13-T15 done; briefs T16 T17 from T15 review
 2026-11-11T07:26:32Z | started oauth-fixes workflow runId=wf_b55eccf9-38d scriptPath=<local session dir> (T16 opus, T17 haiku)
 2026-11-11T07:26:32Z | oauth-fixes started
+2026-11-11T07:26:45Z | T17: OAuth doc fixes from T15 re-review

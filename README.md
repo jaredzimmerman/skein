@@ -132,8 +132,9 @@ the server's resource, and only a hash is stored.
 A client gets a client ID in one of two ways.
 
 - **Dynamic registration.** The client registers itself at `/register` (RFC 7591), with no setup.
-  Its redirect addresses must be https, or http on localhost. At most 50 clients can register this
-  way. At the cap, registrations idle for more than a day are removed to make room. Registration is
+  Its redirect addresses may be https, http on localhost, or a private-use app scheme (for example
+  `com.example.app:/callback`). At most 50 clients can register this way. At the cap, registrations
+  more than a day old that hold no code or token (idle registrations) are removed to make room. Registration is
   limited to 10 per minute for the whole server; a client over the limit gets 429 with `Retry-After`.
 - **Pre-registered.** The owner adds the client on the server:
 

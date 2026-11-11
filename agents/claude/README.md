@@ -23,8 +23,8 @@ Per the support article: available on Free (one custom connector), Pro, Max, Tea
 
 1. Customize > Connectors > "+ Add" > "Add custom connector".
 2. Enter a name and `https://skein.example.com/mcp`, Continue.
-3. Authentication: choose "No sign in" (skein does not do OAuth).
-4. Under "Request headers", add `Authorization: Bearer <token>`. The article says this field takes fixed credentials such as bearer tokens, sent on every request, stored encrypted.
+3. Authentication: if the server has `[oauth] enabled = true`, Claude can sign in with OAuth. Approve the request on skein's consent page with the claude member token. Otherwise choose "No sign in" and send the token in the request header in step 4. See the README's "OAuth sign-in" section for details.
+4. For "No sign in", under "Request headers", add `Authorization: Bearer <token>`. The article says this field takes fixed credentials such as bearer tokens, sent on every request, stored encrypted.
 5. Add. Enable the connector per conversation with "+" > Connectors.
 
 Notes: on Team/Enterprise one owner adds the connector and everyone shares the same credential, so use a dedicated skein member for it. To change the token you must remove and re-add the connector. The article gives no separate Claude desktop steps; assume the same flow and check.
