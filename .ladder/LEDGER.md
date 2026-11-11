@@ -12,3 +12,4 @@
 2026-11-11T05:15:31Z | decision: user approved a private deployment after the final review passes; new members join as plain members (tokens only, no extra code). Deployment details live in a gitignored local file.
 2026-11-11T05:15:50Z | decision: deploy approved; local deploy notes gitignored
 2026-11-11T05:16:17Z | T01: store, service, tokens, errors; 87 service tests green
+2026-11-11T05:16:32Z | T01: result written
