@@ -13,3 +13,4 @@
 2026-11-11T05:15:50Z | decision: deploy approved; local deploy notes gitignored
 2026-11-11T05:16:17Z | T01: store, service, tokens, errors; 87 service tests green
 2026-11-11T05:16:32Z | T01: result written
+2026-11-11T05:19:23Z | T01: review r1 approve
