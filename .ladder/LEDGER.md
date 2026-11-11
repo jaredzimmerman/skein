@@ -22,3 +22,4 @@
 2026-11-11T05:20:29Z | started wave2 workflow runId=wf_9631e1ce-4a4 scriptPath=<local session dir> (T03 opus, T04 haiku, then T07 fable)
 2026-11-11T05:20:29Z | wave2 started, runId logged
 2026-11-11T05:26:10Z | T04: CLI + tests
+2026-11-11T05:26:42Z | T04: review r1 approve
