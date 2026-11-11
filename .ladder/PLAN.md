@@ -219,11 +219,11 @@ approved 2026-11-10; pushed every checkpoint) · Author: Jared Zimmerman, no AI 
 | T06 | Agent folders: claude, muse, _template | sonnet | – | agents/** | `find agents -name '*.md' | wc -l` ≥ 10 | done |
 | T07 | Final integration review + full suite | fable | T01–T06 | – | `uv run pytest -q` | done (changes → T08–T12) |
 
-| T08 | Config: strict types per key + `allowed_origins` | haiku | T07 | src/skein/config.py, skein.example.toml, tests/test_config.py | `uv run pytest tests/test_config.py -q` | todo |
-| T09 | Transport hardening: origins, body cap, audit ids, no access log | opus | T08 | src/skein/{mcp_tools,rest,auth,cli}.py, tests/test_http.py, tests/test_mcp.py, tests/test_cli.py | `uv run pytest -q` | todo |
-| T10 | Service: reserved names, can't disable the point, note on result replace | sonnet | T07 | src/skein/service.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | todo |
-| T11 | Docs/deploy fixes from T07 | haiku | T07 | README.md, docs/architecture.md, deploy/*, agents/**/*.md | `grep -c allowed_origins README.md` ≥1 | todo |
-| T12 | Re-review of T08–T11 + full suite + smoke | fable | T08–T11 | – | `uv run pytest -q` | todo |
+| T08 | Config: strict types per key + `allowed_origins` | haiku | T07 | src/skein/config.py, skein.example.toml, tests/test_config.py | `uv run pytest tests/test_config.py -q` | done |
+| T09 | Transport hardening: origins, body cap, audit ids, no access log | opus | T08 | src/skein/{mcp_tools,rest,auth,cli}.py, tests/test_http.py, tests/test_mcp.py, tests/test_cli.py | `uv run pytest -q` | done |
+| T10 | Service: reserved names, can't disable the point, note on result replace | sonnet | T07 | src/skein/service.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | done |
+| T11 | Docs/deploy fixes from T07 | haiku | T07 | README.md, docs/architecture.md, deploy/*, agents/**/*.md | `grep -c allowed_origins README.md` ≥1 | done |
+| T12 | Re-review of T08–T11 + full suite + smoke | fable | T08–T11 | – | `uv run pytest -q` | done |
 
 Status values: todo · in-progress · review · done · blocked:human · escalated
 Out of scope for v1: migrating the live bridge queue.db, PyPI publishing. A private deployment is approved (after T07); its details stay out of the repo.

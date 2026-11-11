@@ -45,3 +45,6 @@
 2026-11-11T05:56:34Z | T09: review r1 approve
 2026-11-11T06:00:38Z | T12: re-review approve
 2026-11-11T06:01:34Z | T12 lows: CLI missing-config message, url_tokens proxy note, audit wording, init umask
+2026-11-11T06:01:53Z | done T08 haiku r1, T09 opus r1, T10 sonnet r1, T11 haiku r1
+2026-11-11T06:01:53Z | done T12 fable approve (lows fixed directly in 568d095; 246 passed)
+2026-11-11T06:01:53Z | build complete: T08-T12 done
