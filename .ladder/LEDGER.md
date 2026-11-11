@@ -65,3 +65,7 @@
 2026-11-11T07:12:12Z | T14: docs for OAuth (README, architecture, proxy examples, agent template)
 2026-11-11T07:13:11Z | T14: review r1 approve
 2026-11-11T07:25:11Z | T15: re-review changes
+2026-11-11T07:26:07Z | done T13 opus r2 (fable approve), T14 haiku r1
+2026-11-11T07:26:07Z | review-fail T15 fable: no security hole; Basic client auth + revoke form compat (medium), docs, consent hand-back, /register 500, loopback edge cases → T16/T17
+2026-11-11T07:26:07Z | decision: consent hands back via a 200 no-store page (meta refresh + Continue link) instead of a 303, keeping C8 form-action 'self' exactly
+2026-11-11T07:26:07Z | T13-T15 done; briefs T16 T17 from T15 review
