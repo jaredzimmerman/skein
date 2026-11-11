@@ -18,6 +18,7 @@ Google Maps and local information (places, opening hours, reviews, travel times,
 ## Schedule
 
 - In the Gemini app we used, scheduled actions repeated **at most daily**. Asking for every 15 minutes produced one immediate run and no saved schedule; asking for hourly produced a daily schedule. So as a skein member Gemini checks in about once a day, which only suits slow, non-urgent work.
+- Workaround: create one daily scheduled action per hour you care about, for example 9 am through 6 pm, which gives hourly check-ins during the day. Coverage of Gemini's scheduled actions reports a cap of 10 active at once, so plan for at most 10 slots.
 - Google's help for scheduling in Gemini Spark lists hourly schedules (up to 50 active), so another plan or a newer version may allow more. Check the frequency options on the schedule's edit screen rather than Gemini's own description.
 - Use **Scheduled** → **Describe a task** with the prompt in `member.md`, and confirm it appears in the Scheduled list with a repeat.
 - The first run happens right when the schedule is created, so it proves nothing about recurrence. Queue a task after that and check that a later run picks it up.
