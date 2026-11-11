@@ -200,6 +200,46 @@ URL, where the token goes, what to verify), `point.md` (the routine/prompt when 
 `agents/claude/skill/skein/SKILL.md` and a scheduled-check-in prompt. Steps about a vendor's UI that
 can't be verified are marked as such, never invented.
 
+### C8 OAuth sign-in (added 2026-11-11; decision: needed for OAuth-only MCP clients)
+Some clients only connect to remote MCP servers through OAuth 2.1 (MCP authorization spec).
+skein is its own authorization server and resource server. Fixed member tokens keep working
+everywhere; OAuth is an extra way to *become* a member.
+- Config: `[server] public_url = ""` (e.g. "https://skein.example.com/skein", no trailing slash) and
+  `[oauth] enabled = false`, `access_token_ttl = 3600`, `refresh_token_ttl = 2592000`.
+  `oauth.enabled = true` requires `public_url` (else ValueError). Strict types as in T08.
+- Use mcp 1.30's auth pieces (`mcp.server.auth`: provider protocol, `create_auth_routes`,
+  protected-resource routes, PKCE handling) rather than re-implementing them. Verify every API
+  against the installed source in `.venv`.
+- Endpoints, all under base_path: SDK paths (`/authorize`, `/token`, `/register`, `/revoke`),
+  consent page `/oauth/consent`, metadata. Metadata is served BOTH at RFC 8414/9728 path-inserted
+  root URLs (`/.well-known/oauth-authorization-server{base}`, `/.well-known/oauth-protected-resource{base}/mcp`,
+  plus `/.well-known/openid-configuration{base}`) AND base-appended (`{base}/.well-known/...`).
+  issuer = public_url; resource = public_url + "/mcp"; S256 PKCE only; scope `skein`.
+- 401 responses (MCP and REST) add `resource_metadata="<root path-inserted protected-resource URL>"`
+  to `WWW-Authenticate` when OAuth is enabled.
+- Clients: (a) dynamic registration (RFC 7591), open, capped (max 50 clients; registration
+  rate-limited); (b) pre-registered via CLI `skein oauth client add NAME [--redirect-uri URI ...]`
+  → prints client_id and client_secret once (secret stored hashed). A CLI client with no
+  redirect URI locks to the first https redirect_uri used in an approved consent (trust on first
+  use); after that, exact match only. `skein oauth client list`, `skein oauth client remove ID`
+  (revokes its tokens).
+- Consent: `/authorize` (SDK) → provider stores a pending request (10 min, max 5 bad attempts) and
+  redirects to `/oauth/consent?req=<id>`. The page names the client and asks for the skein token of
+  the member it should act as. A valid, enabled member token → one-time auth code (10 min, hashed,
+  bound to client, redirect_uri, PKCE challenge, member, resource) → redirect with code + state.
+  Page: no external resources, escaped text, `Content-Security-Policy: default-src 'none'; style-src
+  'unsafe-inline'; form-action 'self'`, `X-Frame-Options: DENY`, `Cache-Control: no-store`.
+  The member token is never logged, stored or echoed back.
+- Tokens: opaque `skeino_…` access tokens and `skeinr_…` refresh tokens, stored hashed, bound to
+  member + client + resource; refresh rotates (old refresh token dies). The auth middleware accepts
+  a valid access token exactly like that member's fixed token (same identity path, same per-request
+  isolation). Disabled member → rejected. `rotate_token` and disabling a member revoke all its OAuth
+  tokens and codes.
+- Store: schema `user_version` 2 with tables for oauth clients, pending requests, codes, tokens; a
+  v1 database migrates in place on open (the live server has a v1 database with real members).
+- Audit: OAuth events (register, consent ok/fail, token issue/refresh/revoke) logged with ids and
+  member names only — never tokens, secrets, codes or verifiers.
+
 ## Public-repo hygiene (every task)
 No real hostnames, IPs, tokens, emails, or personal details (use `skein.example.com`, "Sam").
 Never touch any remote server or running service. Copyright/author: Jared Zimmerman. MIT license.
@@ -224,6 +264,9 @@ approved 2026-11-10; pushed every checkpoint) · Author: Jared Zimmerman, no AI 
 | T10 | Service: reserved names, can't disable the point, note on result replace | sonnet | T07 | src/skein/service.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | done |
 | T11 | Docs/deploy fixes from T07 | haiku | T07 | README.md, docs/architecture.md, deploy/*, agents/**/*.md | `grep -c allowed_origins README.md` ≥1 | done |
 | T12 | Re-review of T08–T11 + full suite + smoke | fable | T08–T11 | – | `uv run pytest -q` | done |
+| T13 | OAuth sign-in (C8): store v2 + migration, provider, consent, CLI clients, wiring + tests | opus | T12 | src/skein/{oauth,store,service,config,app,auth,cli}.py, skein.example.toml, tests/test_oauth.py (+ existing tests kept green) | `uv run pytest -q` | todo |
+| T14 | Docs for OAuth | haiku | T13 | README.md, docs/architecture.md, deploy/nginx.conf.example, deploy/Caddyfile.example, agents/_template/README.md | `grep -c 'oauth' README.md` ≥3 | todo |
+| T15 | Re-review OAuth + live-style smoke | fable | T13,T14 | – | `uv run pytest -q` | todo |
 
 Status values: todo · in-progress · review · done · blocked:human · escalated
 Out of scope for v1: migrating the live bridge queue.db, PyPI publishing. A private deployment is approved (after T07); its details stay out of the repo.

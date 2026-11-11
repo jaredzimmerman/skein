@@ -52,3 +52,5 @@
 2026-11-11T06:03:20Z | history rewritten and force-pushed once
 2026-11-11T06:04:40Z | done private deploy of 8caf5e8: service active, proxy reloaded, 4 members, point=claude, live smoke passed (REST+MCP, 401, forbidden)
 2026-11-11T06:04:40Z | deployed privately; smoke passed
+2026-11-11T06:29:55Z | decision: add OAuth sign-in (C8) for OAuth-only clients (Gemini requires OAuth; its dialog also takes a pre-registered client id/secret); fixed tokens unchanged
+2026-11-11T06:29:55Z | plan: C8 OAuth contract, briefs T13-T15
