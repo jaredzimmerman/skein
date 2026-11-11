@@ -19,3 +19,5 @@
 2026-11-11T05:19:58Z | done T05 haiku r1
 2026-11-11T05:19:58Z | done T06 sonnet r2 (1 review-fail round)
 2026-11-11T05:19:58Z | wave1 done; briefs updated for wave 2 + T07
+2026-11-11T05:20:29Z | started wave2 workflow runId=wf_9631e1ce-4a4 scriptPath=<local session dir> (T03 opus, T04 haiku, then T07 fable)
+2026-11-11T05:20:29Z | wave2 started, runId logged
