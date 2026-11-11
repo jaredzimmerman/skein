@@ -3,9 +3,9 @@
 JSON in, JSON out. Errors are ``{"error", "code"}`` with not_found 404,
 forbidden 403, invalid 400, conflict 409; a body over 1 MiB is 413
 ``{"error": "request body too large", "code": "invalid"}`` before any parsing;
-anything unexpected is 500 ``{"error": "internal error", "code": "internal"}``. Every rule lives in the
-service; handlers only unpack the request and call it as the member the auth
-middleware identified.
+anything unexpected is 500 ``{"error": "internal error", "code": "internal"}``.
+Every rule lives in the service; handlers only unpack the request and call it
+as the member the auth middleware identified.
 """
 
 from __future__ import annotations
@@ -60,8 +60,11 @@ class BodyTooLarge(Exception):
 async def _read_body(request: Request) -> bytes:
     """The raw body, refusing more than :data:`BODY_MAX` bytes: a larger Content-Length
     is refused before reading, and a streamed body as soon as it passes the cap."""
-    declared = request.headers.get("content-length", "").strip()
-    if declared.isdigit() and int(declared) > BODY_MAX:
+    try:
+        declared = int(request.headers.get("content-length", ""))
+    except ValueError:  # absent or malformed: the streamed count below still holds
+        declared = 0
+    if declared > BODY_MAX:
         raise BodyTooLarge
     raw = bytearray()
     async for chunk in request.stream():
