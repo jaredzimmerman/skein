@@ -1,0 +1,50 @@
+# Example nginx reverse proxy for skein.
+#
+# Set in skein.toml to match:
+#   [server] public_hosts = ["skein.example.com"]
+#   [server] base_path    = ""      # keep empty for a dedicated host; see the note at the bottom
+#
+# Certificate paths are placeholders. Use your own (for example from certbot).
+
+server {
+    listen 80;
+    server_name skein.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;                        # nginx 1.25.1 or later; remove on older versions
+    server_name skein.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/skein.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/skein.example.com/privkey.pem;
+
+    # MCP streams responses. Turn buffering off so each event reaches the client
+    # as it is produced, and allow long-lived requests.
+    location /mcp {
+        proxy_pass http://127.0.0.1:8771;   # no URI part: the original path is passed unchanged
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;        # must match an entry in public_hosts
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8771;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# If skein runs under a path prefix (base_path = "/skein"), replace the two
+# location blocks with "location /skein/mcp" and "location /skein/", and keep
+# the prefix in the URL: skein serves its routes under base_path, so the
+# request path must still start with /skein/. Do not add a trailing slash to
+# base_path in skein.toml.

@@ -1,0 +1,43 @@
+# systemd unit for skein.
+#
+# Install (paths are examples; adjust to where the code lives):
+#   sudo useradd --system --home /var/lib/skein --shell /usr/sbin/nologin skein
+#   sudo install -d -o skein -g skein /var/lib/skein
+#   sudo install -d -o root -g skein -m 0750 /etc/skein
+#   sudo cp skein.example.toml /etc/skein/skein.toml   # then edit: db and audit_log under /var/lib/skein
+#   sudo chown root:skein /etc/skein/skein.toml && sudo chmod 0640 /etc/skein/skein.toml
+#   sudo -u skein /opt/skein/.venv/bin/skein --config /etc/skein/skein.toml init
+#   sudo -u skein /opt/skein/.venv/bin/skein --config /etc/skein/skein.toml member add claude
+#   sudo cp skein.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now skein
+
+[Unit]
+Description=skein shared assistant queue
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=skein
+Group=skein
+WorkingDirectory=/var/lib/skein
+# --config is a global option, so it goes before the subcommand.
+ExecStart=/opt/skein/.venv/bin/skein --config /etc/skein/skein.toml serve
+Restart=on-failure
+RestartSec=5
+
+# Hardening. The only writable path is the state directory, which holds the
+# SQLite database and the optional audit log.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/skein
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

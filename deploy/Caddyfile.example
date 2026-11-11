@@ -1,0 +1,25 @@
+# Example Caddy reverse proxy for skein.
+#
+# Caddy obtains and renews the TLS certificate for the site address itself.
+# Set in skein.toml to match:
+#   [server] public_hosts = ["skein.example.com"]
+#   [server] base_path    = ""      # keep empty for a dedicated host; see the note at the bottom
+
+skein.example.com {
+    # flush_interval -1 turns response buffering off, so MCP streams reach the
+    # client as they are produced.
+    reverse_proxy 127.0.0.1:8771 {
+        flush_interval -1
+    }
+}
+
+# If skein runs under a path prefix (base_path = "/skein"), use "handle" rather
+# than "handle_path", because handle_path strips the prefix and skein expects it:
+#
+#   skein.example.com {
+#       handle /skein/* {
+#           reverse_proxy 127.0.0.1:8771 {
+#               flush_interval -1
+#           }
+#       }
+#   }
