@@ -87,3 +87,4 @@
 2026-11-11T08:23:33Z | docs: agents/grok + agents/gemini, unattended-member guidance, stdio bridge note, Muse cadence, shared-host well-known + upgrade steps
 2026-11-11T08:33:47Z | docs: agents/chatgpt (OAuth first-try, hourly-only Tasks, 4 staggered), overlap-safe claim rule in member prompts
 2026-11-11T08:48:35Z | verified: chatgpt :45 scheduled task picked up a queued task unattended (08:47); gemini app scheduled actions daily max (docs updated)
+2026-11-11T08:58:30Z | docs: at-a-glance member table; handoff refreshed

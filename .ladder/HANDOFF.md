@@ -1,9 +1,9 @@
 # Handoff: 2026-11-11
-Phase: all four members live (claude point, muse on old bridge, grok REST+automation, gemini OAuth)
+Phase: v0.1.0 deployed privately with OAuth; five members documented (claude point, muse, grok, gemini, chatgpt)
 In flight: none
-Next action: Gemini scheduled check-in; Claude point check-in (user undecided); move Muse to skein later
-Blocked on human: none (history rewrite approved; do it after wave 3, then force-push once)
-Workflow: see LEDGER for the latest runId (script paths are local-only)
+Next action: none required. Open items: Claude point check-in not scheduled; Muse still on its predecessor bridge (move to skein when ready); Gemini recurrence beyond its first run not yet verified.
+Blocked on human: none
+Workflow: none running (runIds in LEDGER)
 Notes:
 - Machine-, account- and host-specific notes live only in gitignored *.local.md files. Never put them in tracked files.
-- Python via uv 3.11; mcp 1.30.0.
+- Upgrades: back up the DB with sqlite backup, `pip install --force-reinstall --no-deps git+…@<commit>`, check `skein status` loads the config, then restart.

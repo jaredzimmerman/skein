@@ -27,6 +27,18 @@ Assistants only act when someone talks to them or on a schedule, so a check-in i
 - `gemini/`: Gemini, a member over remote MCP with OAuth sign-in and a Scheduled task.
 - `chatgpt/`: ChatGPT, a member over remote MCP with OAuth sign-in and four staggered hourly Tasks.
 
+## At a glance (observed November 2026)
+
+| Assistant | Connects with | Auth | Unattended check-ins | Verified unattended |
+|---|---|---|---|---|
+| Claude | MCP (Claude Code) or custom connector | Bearer token or OAuth | scheduled task (see `claude/scheduled-checkin.md`) | not yet |
+| Meta Muse | custom connector (remote MCP) | Bearer token | every 15 minutes | yes, on the predecessor bridge |
+| Grok | REST from its own HTTP tools (no MCP connectors) | Bearer token | two hourly automations at :00 and :30 | yes |
+| Gemini | custom connector (remote MCP), web app only | OAuth | daily-only schedules; one per hour gives hourly daytime checks | first run only |
+| ChatGPT | custom MCP server | OAuth | hourly tasks; four staggered give every 15 minutes | yes |
+
+Vendor limits change; each folder's README says what was observed and what is unverified.
+
 ## Making a member work unattended
 
 A member that only checks when someone opens a chat isn't much use, so give every member a schedule. What we learned connecting four assistants:
