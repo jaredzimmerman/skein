@@ -85,3 +85,4 @@
 2026-11-11T08:08:02Z | verified: an OAuth-only client (via its web app) completed DCR → consent → token as member gemini; the desktop app stalled on the vendor linking page before /authorize (vendor-side). Cleaned unused DCR clients and temp debug logging.
 2026-11-11T08:08:02Z | gemini connected via oauth
 2026-11-11T08:23:33Z | docs: agents/grok + agents/gemini, unattended-member guidance, stdio bridge note, Muse cadence, shared-host well-known + upgrade steps
+2026-11-11T08:33:47Z | docs: agents/chatgpt (OAuth first-try, hourly-only Tasks, 4 staggered), overlap-safe claim rule in member prompts

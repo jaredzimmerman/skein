@@ -8,7 +8,7 @@ Every 15 minutes (if 15 isn't available, the shortest interval offered), check m
 1. Call skein_inbox with limit 10.
 2. If both "tasks" and "answers" are empty lists, end the run silently. No notification.
 3. For each item in "tasks", oldest first:
-   a. If its status is "queued", call skein_claim with task_id = its id. If its status is already "claimed", skip the claim and continue it.
+   a. If its status is "queued", call skein_claim with task_id = its id. If its status is "claimed" and its "claimed" time is less than 30 minutes ago, skip it: another run is working on it. If it was claimed longer ago than that, continue it without claiming again.
    b. Do what its "instructions" field says, using your own tools. Also read its "notes" for follow-ups from the lead.
    c. Call skein_submit with task_id = its id, result = the actual finished output (not a description of it), and status = "done".
    d. If you can't finish, call skein_submit with status "failed" and the reason as the result. If you need information to finish, use status "needs_input" with one precise question as the result.

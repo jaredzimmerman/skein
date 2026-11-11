@@ -67,8 +67,8 @@ To run the test suite: `uv run pytest -q`.
 `agents/README.md` explains how a member joins: the URL, where the token goes, and what to check
 afterwards, and how to make sure a member works on a schedule without anyone prompting it.
 `agents/_template/` is a starting point for a new assistant. Worked examples: `agents/claude/`,
-`agents/muse/`, `agents/grok/` (REST with scheduled automations) and `agents/gemini/` (remote MCP
-with OAuth sign-in). Each folder has a `point.md` for when that assistant is the point and a
+`agents/muse/`, `agents/grok/` (REST with scheduled automations), `agents/gemini/` and
+`agents/chatgpt/` (remote MCP with OAuth sign-in). Each folder has a `point.md` for when that assistant is the point and a
 `member.md` for when it is a member. A client that can only sign in with OAuth needs
 `[oauth]` turned on first; see OAuth sign-in below.
 
