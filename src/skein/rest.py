@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .auth import INTERNAL, Audit, log_internal, member_of, result_id, summarize
+from .auth import CHALLENGE, INTERNAL, UNAUTHORIZED, Audit, log_internal, member_of, result_id, summarize
 from .errors import SkeinError
 from .service import Skein
 
@@ -78,20 +78,19 @@ def _int_param(request: Request, name: str) -> int | None:
 def _endpoint(
     audit: Audit, method: str, label: str, call: Call, *, body: bool = False, wrap: str = ""
 ) -> Callable[[Request], Any]:
+    id_key = "ask_id" if label.startswith("/asks") else "task_id"
+
     async def endpoint(request: Request) -> JSONResponse:
         member = member_of(request)
-        args: dict[str, Any] = {}
-        if "id" in request.path_params:
-            key = "ask_id" if label.startswith("/asks") else "task_id"
-            args[key] = request.path_params["id"]
+        payload: dict[str, Any] = {}
+        value: Any = None
         status, code = 200, None
         if member is None:  # the auth middleware should make this unreachable
-            response = error_response("forbidden", "unauthorized", 401)
+            response = JSONResponse(UNAUTHORIZED, status_code=401, headers=CHALLENGE)
             status, code = 401, "unauthorized"
         else:
             try:
                 payload = await _json_body(request) if body else {}
-                args.update(payload)
                 value = await run_in_threadpool(call, member, request, payload)
                 response = JSONResponse({wrap: value} if wrap else value)
             except SkeinError as exc:
@@ -101,11 +100,13 @@ def _endpoint(
                 log_internal(f"{method} {label}", exc)
                 status, code = 500, "internal"
                 response = JSONResponse(INTERNAL, status_code=500)
+        args = dict(payload)
+        if "id" in request.path_params:
+            args[id_key] = request.path_params["id"]
         ids, lens = summarize(args)
-        if status == 200:
-            created = result_id(json.loads(response.body)) if not wrap else None
-            if created and created not in ids.values():
-                ids["id"] = created
+        created = result_id(value) if not wrap else None
+        if created and created not in ids.values():
+            ids["id"] = created
         audit.log(
             kind="rest", member=member, route=f"{method} {label}", status=status, code=code,
             ids=ids, lens=lens,

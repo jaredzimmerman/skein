@@ -41,3 +41,16 @@ def store(db_path) -> Store:
 @pytest.fixture
 def skein(store, clock) -> Skein:
     return Skein(store, clock=clock)
+
+
+@pytest.fixture
+def team(skein) -> dict[str, str]:
+    """A point ("lead") and two members ("alpha", "beta"). Returns name → token."""
+    tokens = {name: skein.add_member(name, name.title())["token"] for name in ("lead", "alpha", "beta")}
+    skein.set_point("lead")
+    return tokens
+
+
+@pytest.fixture
+def audit_path(tmp_path):
+    return tmp_path / "audit.jsonl"

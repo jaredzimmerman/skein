@@ -23,3 +23,4 @@
 2026-11-11T05:20:29Z | wave2 started, runId logged
 2026-11-11T05:26:10Z | T04: CLI + tests
 2026-11-11T05:26:42Z | T04: review r1 approve
+2026-11-11T05:32:15Z | T03: HTTP app, auth, MCP tools, REST, audit; 60 tests green
