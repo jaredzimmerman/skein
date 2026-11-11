@@ -1,6 +1,6 @@
 # Handoff: 2026-11-11
 Phase: 4 (OAuth sign-in, C8)
-In flight: about to launch T13→T14→T15 workflow
+In flight: oauth workflow wf_7b859e82-ba3 (T13 → T14 → T15)
 Next action: launch OAuth workflow; after T15 approves, redeploy (gitignored notes) with oauth enabled + public_url, add root .well-known proxy locations, verify live, user retries Gemini
 Blocked on human: none (history rewrite approved; do it after wave 3, then force-push once)
 Workflow: see LEDGER for the latest runId (script paths are local-only)

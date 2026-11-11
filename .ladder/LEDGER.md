@@ -54,3 +54,5 @@
 2026-11-11T06:04:40Z | deployed privately; smoke passed
 2026-11-11T06:29:55Z | decision: add OAuth sign-in (C8) for OAuth-only clients (Gemini requires OAuth; its dialog also takes a pre-registered client id/secret); fixed tokens unchanged
 2026-11-11T06:29:55Z | plan: C8 OAuth contract, briefs T13-T15
+2026-11-11T06:30:20Z | started oauth workflow runId=wf_7b859e82-ba3 scriptPath=<local session dir> (T13 opus → T14 haiku → T15 fable)
+2026-11-11T06:30:20Z | oauth workflow started
