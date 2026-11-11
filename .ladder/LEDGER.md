@@ -27,3 +27,4 @@
 2026-11-11T05:32:39Z | T03: result written
 2026-11-11T05:36:33Z | T03: review r1 approve
 2026-11-11T05:43:00Z | T07: final review changes
+2026-11-11T05:45:11Z | decision: scrub tracked ladder notes of local/account details; briefs T08-T12 from T07 review

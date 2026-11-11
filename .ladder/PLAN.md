@@ -142,8 +142,8 @@ audit_log = ""                 # optional JSONL path; "" disables
 owner = "the user"             # how assistants refer to the human, e.g. "Sam"
 answer_time = "within about an hour"   # what members are told about the point's response time
 ```
-`Config` fields: `host, port, base_path, public_hosts (tuple), url_tokens, db, audit_log, owner,
-answer_time`.
+`Config` fields: `host, port, base_path, public_hosts (tuple), allowed_origins (tuple), url_tokens, db, audit_log, owner,
+answer_time`. (decision T08: `[server] allowed_origins = []` — extra Origin values the MCP endpoint accepts; types are checked per key.)
 
 ### C4 HTTP surface (`src/skein/app.py`, `auth.py`, `mcp_tools.py`, `rest.py`)
 `create_app(config: Config, skein: Skein | None = None) -> Starlette app`. `B` = base_path.
@@ -213,11 +213,17 @@ approved 2026-11-10; pushed every checkpoint) · Author: Jared Zimmerman, no AI 
 |---|---|---|---|---|---|---|
 | T01 | Store, service, tokens, errors + tests | opus | – | src/skein/{store,service,tokens,errors}.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | done |
 | T02 | Config loader + example + tests | haiku | – | src/skein/config.py, skein.example.toml, tests/test_config.py | `uv run pytest tests/test_config.py -q` | done |
-| T03 | HTTP app: auth, MCP tools, REST, audit + tests | opus | T01,T02 | src/skein/{app,auth,mcp_tools,rest}.py, tests/test_http.py, tests/test_mcp.py | `uv run pytest tests/test_http.py tests/test_mcp.py -q` | todo |
-| T04 | CLI + tests | haiku | T01,T02 | src/skein/cli.py, tests/test_cli.py | `uv run pytest tests/test_cli.py -q` | todo |
+| T03 | HTTP app: auth, MCP tools, REST, audit + tests | opus | T01,T02 | src/skein/{app,auth,mcp_tools,rest}.py, tests/test_http.py, tests/test_mcp.py | `uv run pytest tests/test_http.py tests/test_mcp.py -q` | done |
+| T04 | CLI + tests | haiku | T01,T02 | src/skein/cli.py, tests/test_cli.py | `uv run pytest tests/test_cli.py -q` | done |
 | T05 | README, docs/architecture.md, deploy/, LICENSE | haiku | – | README.md, docs/architecture.md, deploy/*, LICENSE | `test -s README.md && test -s docs/architecture.md && test -s LICENSE && ls deploy` | done |
 | T06 | Agent folders: claude, muse, _template | sonnet | – | agents/** | `find agents -name '*.md' | wc -l` ≥ 10 | done |
-| T07 | Final integration review + full suite | fable | T01–T06 | – | `uv run pytest -q` | todo |
+| T07 | Final integration review + full suite | fable | T01–T06 | – | `uv run pytest -q` | done (changes → T08–T12) |
+
+| T08 | Config: strict types per key + `allowed_origins` | haiku | T07 | src/skein/config.py, skein.example.toml, tests/test_config.py | `uv run pytest tests/test_config.py -q` | todo |
+| T09 | Transport hardening: origins, body cap, audit ids, no access log | opus | T08 | src/skein/{mcp_tools,rest,auth,cli}.py, tests/test_http.py, tests/test_mcp.py, tests/test_cli.py | `uv run pytest -q` | todo |
+| T10 | Service: reserved names, can't disable the point, note on result replace | sonnet | T07 | src/skein/service.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | todo |
+| T11 | Docs/deploy fixes from T07 | haiku | T07 | README.md, docs/architecture.md, deploy/*, agents/**/*.md | `grep -c allowed_origins README.md` ≥1 | todo |
+| T12 | Re-review of T08–T11 + full suite + smoke | fable | T08–T11 | – | `uv run pytest -q` | todo |
 
 Status values: todo · in-progress · review · done · blocked:human · escalated
 Out of scope for v1: migrating the live bridge queue.db, PyPI publishing. A private deployment is approved (after T07); its details stay out of the repo.

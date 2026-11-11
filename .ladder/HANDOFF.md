@@ -1,11 +1,9 @@
-# Handoff: 2026-11-10
-Phase: 2/2 (HTTP app + CLI, then T07 final review)
-In flight: wave 2 workflow (T03 opus, T04 haiku, then T07 fable)
-Next action: wait for wave-2 workflow; if T07 approves, deploy per .ladder/DEPLOY.local.md (user approved), then members + per-assistant paste blocks
-Then: private deploy (details in gitignored local notes)
-Blocked on human: none
-Workflow: runId=wf_9631e1ce-4a4 scriptPath=<local session dir>
+# Handoff: 2026-11-11
+Phase: 3 (fixes from T07 final review) · Last good commit: see `git log -1`
+In flight: about to launch wave-3 workflow (T08–T11), then T12 re-review
+Next action: launch wave 3 from briefs T08–T11; after T12 approves, follow the gitignored .ladder/DEPLOY.local.md
+Blocked on human: whether to rewrite history to drop already-pushed .ladder notes (needs a force-push; asked)
+Workflow: see LEDGER for the latest runId (script paths are local-only)
 Notes:
-- Machine-, account- and host-specific notes live only in gitignored *.local.md files.
-- Python via uv 3.11 (system python is 3.9). mcp 1.30.0.
-- The origin bridge code is not in this repo; never touch running services from this repo's work.
+- Machine-, account- and host-specific notes live only in gitignored *.local.md files. Never put them in tracked files.
+- Python via uv 3.11; mcp 1.30.0.
