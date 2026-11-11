@@ -24,6 +24,14 @@ Google Maps and local information (places, opening hours, reviews, travel times,
 - The first run happens right when the schedule is created, so it proves nothing about recurrence. Queue a task after that and check that a later run picks it up.
 - Gemini's Scheduled page notes that tasks local to a Mac don't run while it sleeps ("Keep your Mac awake to run local scheduled tasks"). If the schedule is local, turn that on.
 
+## Images
+
+Gemini generated an image in a scheduled run but couldn't return a link to it (it stayed inline in the session as a temporary asset). Don't route image work to Gemini through skein.
+
+## Permission prompts
+
+A scheduled run can stop and wait for the person to approve a permission prompt in Gemini before it uses the connector or a tool. One test task sat for about two hours until it was approved. If tasks for Gemini sit unclaimed during its scheduled hours, check Gemini for a pending approval.
+
 ## Test
 
 1. In a chat: "Using the skein connector, call skein_whoami." Expect member `gemini`, role `member`.
