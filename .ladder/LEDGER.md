@@ -58,3 +58,4 @@
 2026-11-11T06:30:20Z | oauth workflow started
 2026-11-11T06:52:13Z | T13: OAuth sign-in (store v2, provider, consent, CLI clients, wiring); 322 passed
 2026-11-11T06:57:33Z | T13: result written
+2026-11-11T07:02:54Z | T13: review r1 changes
