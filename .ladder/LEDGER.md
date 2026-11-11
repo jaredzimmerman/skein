@@ -57,3 +57,4 @@
 2026-11-11T06:30:20Z | started oauth workflow runId=wf_7b859e82-ba3 scriptPath=<local session dir> (T13 opus → T14 haiku → T15 fable)
 2026-11-11T06:30:20Z | oauth workflow started
 2026-11-11T06:52:13Z | T13: OAuth sign-in (store v2, provider, consent, CLI clients, wiring); 322 passed
+2026-11-11T06:57:33Z | T13: result written

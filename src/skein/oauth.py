@@ -21,6 +21,13 @@ handlers and ``ClientAuthenticator``. They are mounted here rather than through
 ``ClientAuthenticator`` that compares plaintext secrets, while skein keeps only secret
 hashes (see :class:`HashedSecretAuthenticator`, which wraps the SDK's).
 
+Where the rules live: the grant rules (expiry, bad-attempt limit, what a code or token
+is bound to, single use, refresh rotation, trust-on-first-use locking) are in this
+module; ``store.py`` only reads and writes the rows; ``service.py`` owns the owner's
+client admin functions and ends a member's grants when its token rotates or it is
+disabled. Member identity still has one path: :meth:`SkeinOAuth.authenticate` returns
+a member name to the same auth middleware fixed tokens go through.
+
 Every secret (client secrets, codes, access and refresh tokens, and the member token
 typed on the consent page) is stored only as a SHA-256 hash, or not at all, and never
 reaches the audit log: OAuth events record client ids, member names and counts only.
