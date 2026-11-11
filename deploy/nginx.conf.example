@@ -5,6 +5,10 @@
 #   [server] base_path    = ""      # keep empty for a dedicated host; see the note at the bottom
 #
 # Certificate paths are placeholders. Use your own (for example from certbot).
+#
+# Logs: if url_tokens is on, a token can arrive in a query string. Turn this
+# server's access log off (access_log off;) or use a log format without
+# $request_uri or $args. skein itself writes no access log.
 
 server {
     listen 80;
@@ -20,8 +24,8 @@ server {
     ssl_certificate     /etc/letsencrypt/live/skein.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/skein.example.com/privkey.pem;
 
-    # MCP streams responses. Turn buffering off so each event reaches the client
-    # as it is produced, and allow long-lived requests.
+    # skein answers with plain JSON. Buffering is off so each response passes
+    # through as soon as skein sends it; long timeouts cover slow tool calls.
     location /mcp {
         proxy_pass http://127.0.0.1:8771;   # no URI part: the original path is passed unchanged
         proxy_http_version 1.1;

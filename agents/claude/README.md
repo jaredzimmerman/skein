@@ -33,7 +33,7 @@ Unverified: the exact label of the header field input (name and value boxes vs o
 
 ### Fallback if no header can be sent: `url_tokens`
 
-If your plan or client has no request-headers field, set `url_tokens = true` in the skein config and use `https://skein.example.com/mcp?token=<token>` as the connector URL. Risk: the token sits in the URL, so it can appear in proxy and server logs, browser history and screenshots. skein's audit log never records it, but your reverse proxy may. Use a dedicated member, rotate with `skein member rotate claude`, and turn `url_tokens` off once headers work.
+If your plan or client has no request-headers field, set `url_tokens = true` in the skein config and use `https://skein.example.com/mcp?token=<token>` as the connector URL. Risk: the token sits in the URL, so it can appear in logs, browser history and screenshots. `skein serve` writes no access log, and the audit log never records the token. Your reverse proxy's access log must also be off or strip query strings, or the token lands there. Use a dedicated member, rotate with `skein member rotate claude`, and turn `url_tokens` off once headers work.
 
 ## Running a check-in on a schedule
 

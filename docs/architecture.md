@@ -36,7 +36,8 @@ the network.
   mapped to HTTP status codes.
 - **`app.py`** builds the Starlette application, mounts `/healthz`, `/mcp` and `/api/`, and applies
   authentication and the audit log to everything except `/healthz`.
-- **`config.py`** loads the TOML config into a frozen dataclass. Unknown keys are an error.
+- **`config.py`** loads the TOML config into a frozen dataclass. Unknown keys are an error, and each
+  value is checked against the type its key expects.
 - **`cli.py`** provides the `skein` command: setup, member and point management, status and serve.
 
 Transports never query the store directly and never repeat a rule. A new rule goes in the service,
@@ -55,7 +56,8 @@ There is one point at a time. The point is stored in the database as a meta valu
 is decided per call in the service, so the same connector works in either role.
 
 Making a member the point does not change existing tasks. Tasks still assigned to the new point
-stay as they are, and the point can reassign them.
+stay as they are, and the point can reassign them. The point cannot be disabled: `member disable`
+on the current point is refused with a conflict, and the point must be moved first.
 
 ## Task and ask lifecycle
 
@@ -74,8 +76,10 @@ accepts nothing further. Setting a task to done, failed or needs_input marks it 
 the point, so it shows up in the point's inbox.
 
 A done or failed task stays open to amendment for seven days after it finishes. During that time a
-member can add notes and submit a new result, and the point can send follow-ups. Each amendment
-keeps the previous result in a server note.
+member can add notes and submit a new result, and the point can send follow-ups. Whenever a submit
+replaces a non-empty result, whatever the task's status, the server first adds a note from
+`server` holding the first 1500 characters of the previous result. A replaced result therefore
+never disappears without a trace in the task's notes.
 
 An ask is open until the point answers it. A new answer replaces the old one. The asker is told
 when an answer arrives and sees it once.
@@ -84,7 +88,8 @@ when an answer arrives and sees it once.
 
 SQLite holds three tables and a small meta table:
 
-- `members`: name, display name, token hash, creation time, disabled flag and last seen time.
+- `members`: name, display name, token hash, creation time, disabled flag and last seen time. The
+  names `server`, `point`, `all` and `skein` are reserved and cannot be used for a member.
 - `meta`: key and value pairs. The key `point` holds the point's member name.
 - `tasks`: id, title, instructions, assignee, creator, status, timestamps, result, notes and the
   point's seen flag. Notes are kept as a JSON list, and only the last 50 are kept.
@@ -101,11 +106,16 @@ others, such as titles, results, notes and context, are truncated. Each limit is
 ## Configuration
 
 Config is read from TOML with `tomllib`. The path comes from the command line, then the
-`SKEIN_CONFIG` environment variable, then `./skein.toml`. A missing file means defaults.
+`SKEIN_CONFIG` environment variable, then `./skein.toml`. A path given on the command line or in
+the environment must exist. Only the default `./skein.toml` may be missing, and then defaults
+apply. Each key is checked after parsing: strings for text keys, an integer port from 1 to 65535
+(a boolean is refused), a real boolean for `url_tokens`, and lists of strings for `public_hosts`
+and `allowed_origins`. `base_path` must be empty or start with a single `/`. A wrong type raises
+an error that names the key.
 
-The keys are grouped as `[server]` (host, port, base path, extra allowed hosts, URL tokens),
-`[storage]` (database path and audit log path) and `[instance]` (owner name and expected answer
-time). `skein.example.toml` lists them with comments.
+The keys are grouped as `[server]` (host, port, base path, extra allowed hosts, extra allowed
+origins, URL tokens), `[storage]` (database path and audit log path) and `[instance]` (owner name
+and expected answer time). `skein.example.toml` lists them with comments.
 
 ## HTTP surface
 
@@ -113,18 +123,27 @@ time). `skein.example.toml` lists them with comments.
 - Everything else requires `Authorization: Bearer <token>` or `X-API-Key: <token>`. A `?token=`
   query parameter is accepted only when `url_tokens` is on. A failed check returns 401 with a
   `WWW-Authenticate: Bearer realm="skein"` header.
-- `/mcp` runs FastMCP in stateless, JSON-response mode. DNS-rebinding protection is on, and the
-  allowed hosts are `public_hosts` plus the local loopback names for the configured port. The
-  endpoint handles two client quirks: a GET that asks for an event stream gets a 405 right away,
-  and a plain GET returns a short help document.
-- `/api/` mirrors the MCP tools as REST routes. The full list is in the README.
+- `/mcp` runs FastMCP in stateless, JSON-response mode. The server answers with plain JSON and does
+  not stream. DNS-rebinding protection is on: the allowed hosts are `public_hosts` plus the local
+  loopback names for the configured port. An `Origin` header is allowed only when it matches
+  `public_hosts` or `allowed_origins`. The endpoint handles two client quirks: a GET that asks for
+  an event stream gets a 405 right away, and a plain GET returns a short help document.
+- `/api/` mirrors the MCP tools as REST routes. The full list is in the README. A request body over
+  1 MiB is refused with 413 and code `invalid` before it is parsed.
+- Argument errors that FastMCP rejects before a tool runs come back as the SDK's error text, not as
+  `{"error", "code"}`.
+- `skein serve` runs uvicorn with its access log off. Request lines, and any token in a query
+  string, are never written to the server's log.
 
 ## Audit log
 
-When `storage.audit_log` is set, each request and tool call adds one JSON line. The line holds the
-time, member, tool or route, relevant ids, status, and the length of each text field. The text
-itself is never logged. A failed authentication logs the path, method, user agent and client
-address, and never the token.
+When `storage.audit_log` is set, each REST call, each MCP tool call and each failed sign-in adds
+one JSON line. The line holds the time, member, tool or route, relevant ids, status, and the length
+of each text field. An id is written only when it has the form skein issues (task ids, ask ids and
+member names); anything else in an id position is recorded by its length. The text itself is never
+logged. MCP `initialize` and `tools/list`, the help page, and 404 and 405 responses are not
+audited. A failed authentication logs the method, the path (clipped to 200 characters), user agent
+and client address, and never the token.
 
 ## Running it
 
@@ -134,7 +153,8 @@ One process serves every member. Routine operation uses the CLI against the same
 - `skein member add|list|rotate|disable|enable` manages members and their tokens.
 - `skein point set|show` manages the point.
 - `skein status` shows the point, the members, and the number of open tasks and asks.
-- `skein serve` starts the server on the configured host and port.
+- `skein serve` starts the server on the configured host and port. It writes no access log; the
+  audit log is the only request record.
 
 Because members and the point live in the database, these commands take effect without restarting
 the server. For deployment, see `deploy/`.

@@ -6,8 +6,10 @@
 #   [server] base_path    = ""      # keep empty for a dedicated host; see the note at the bottom
 
 skein.example.com {
-    # flush_interval -1 turns response buffering off, so MCP streams reach the
-    # client as they are produced.
+    # skein answers with plain JSON. flush_interval -1 turns response buffering
+    # off, so each response reaches the client as soon as skein sends it.
+    # Logs: Caddy writes no access log until you add a log directive. If you add
+    # one while url_tokens is on, leave the query string out of it.
     reverse_proxy 127.0.0.1:8771 {
         flush_interval -1
     }

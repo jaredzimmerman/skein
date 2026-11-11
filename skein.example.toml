@@ -10,6 +10,9 @@ port = 8771
 base_path = ""
 # Extra allowed Host headers for MCP DNS-rebinding protection, e.g. ["skein.example.com"].
 public_hosts = []
+# Extra Origin header values the MCP endpoint accepts, e.g. ["https://connector.example.com"].
+# Needed only if a connector sends an Origin header and gets 403.
+allowed_origins = []
 # Also accept ?token=... for clients that cannot send headers. Leave false if you can.
 url_tokens = false
 
