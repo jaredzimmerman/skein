@@ -98,7 +98,9 @@ def _cmd_serve(cfg: Config, args: argparse.Namespace) -> int:
 
     from skein.app import create_app
 
-    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port)
+    # No uvicorn access log, ever: it prints request lines with their query string, which
+    # can carry a ?token=. skein's own audit log is the record of requests.
+    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, access_log=False)
     return 0
 
 

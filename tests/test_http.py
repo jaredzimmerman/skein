@@ -173,6 +173,29 @@ def test_mcp_refuses_foreign_origin(client, team):
     assert r.status_code == 403
 
 
+def test_mcp_origin_allow_list_adds_allowed_origins(make_client, team):
+    connector = "https://connector.example.net"
+    r = mcp_call(make_client(), team["alpha"], "skein_whoami", headers={"Origin": connector})
+    assert r.status_code == 403
+
+    client = make_client(public_hosts=("skein.example.com",), allowed_origins=(connector,))
+    r = mcp_call(client, team["alpha"], "skein_whoami", headers={"Origin": connector})
+    assert r.status_code == 200
+    assert r.json()["result"]["structuredContent"]["member"] == "alpha"
+    # origins derived from the hosts still work alongside it
+    for origin, host in (
+        ("https://skein.example.com", "skein.example.com"),
+        ("http://127.0.0.1:8771", "127.0.0.1:8771"),
+        ("https://localhost:8771", "localhost:8771"),
+    ):
+        r = mcp_call(client, team["alpha"], "skein_whoami", headers={"Origin": origin, "Host": host})
+        assert r.status_code == 200, origin
+    # anything else is still refused
+    for origin in ("https://evil.example.net", "https://connector.example.net:8443", "null"):
+        r = mcp_call(client, team["alpha"], "skein_whoami", headers={"Origin": origin})
+        assert r.status_code == 403, origin
+
+
 # -- REST -------------------------------------------------------------------------
 
 
@@ -329,6 +352,47 @@ def test_rest_unknown_route_and_wrong_method_are_json(client, team):
     assert "GET" in r.headers["allow"]
 
 
+MIB = 1024 * 1024
+TOO_LARGE = {"error": "request body too large", "code": "invalid"}
+
+
+def test_rest_body_over_1_mib_is_413_before_parsing(client, team, audit_path):
+    lead = bearer(team["lead"])
+    # not JSON at all: refused on size, before any parsing would call it malformed (400)
+    r = client.post("/api/tasks", content=b"x" * (MIB + 1), headers={**lead, "Content-Type": "application/json"})
+    assert r.status_code == 413
+    assert r.json() == TOO_LARGE
+    line = audit_lines(audit_path)[-1]
+    assert (line["route"], line["status"], line["code"], line["member"]) == ("POST /tasks", 413, "invalid", "lead")
+    assert "lens" not in line
+
+
+def test_rest_body_cap_holds_without_content_length(client, team):
+    def chunks():  # a streamed (chunked) body declares no length up front
+        for _ in range(17):
+            yield b" " * (64 * 1024)
+        yield b'{"note": "hi"}'
+
+    tid = client.post(
+        "/api/tasks", json={"member": "alpha", "title": "t", "instructions": "i"}, headers=bearer(team["lead"])
+    ).json()["id"]
+    r = client.post(f"/api/tasks/{tid}/note", content=chunks(), headers=bearer(team["alpha"]))
+    assert r.status_code == 413
+    assert r.json() == TOO_LARGE
+
+
+def test_rest_body_of_exactly_1_mib_is_accepted(client, team):
+    tid = client.post(
+        "/api/tasks", json={"member": "alpha", "title": "t", "instructions": "i"}, headers=bearer(team["lead"])
+    ).json()["id"]
+    body = json.dumps({"note": "hi"}).ljust(MIB).encode()
+    assert len(body) == MIB
+    r = client.post(
+        f"/api/tasks/{tid}/note", content=body, headers={**bearer(team["alpha"]), "Content-Type": "application/json"}
+    )
+    assert r.status_code == 200, r.text
+
+
 def test_rest_unexpected_error_is_500_without_details(client, skein, team, monkeypatch, capsys):
     def boom(*args, **kwargs):
         raise RuntimeError(SECRET)
@@ -384,6 +448,42 @@ def test_audit_log_has_lengths_never_text_or_tokens(client, team, audit_path):
     assert failed["method"] == "GET" and failed["path"] == "/api/whoami"
     assert failed["ip"] and "ua" in failed
     assert all("t" in l for l in lines)
+
+
+FREE_TEXT = "Plan: the violet umbrella for the weekend"  # free text, not shaped like any id or name
+
+
+def test_audit_log_keeps_ids_only_when_they_look_like_ids(client, team, audit_path):
+    lead, alpha = bearer(team["lead"]), bearer(team["alpha"])
+    tid = client.post(
+        "/api/tasks", json={"member": "alpha", "title": "t", "instructions": "i"}, headers=lead
+    ).json()["id"]
+    client.get(f"/api/tasks/{FREE_TEXT}", headers=alpha)  # free text as a path id
+    client.post("/api/tasks", json={"member": FREE_TEXT, "title": "t", "instructions": "i"}, headers=lead)
+    # a member-name-shaped string is still not a task id
+    client.post("/api/asks", json={"question": "q", "task_id": SECRET}, headers=alpha)
+    # unused body keys in id positions get the same treatment
+    client.post(f"/api/tasks/{tid}/note", json={"note": "n", "id": FREE_TEXT, "member": "alpha"}, headers=alpha)
+
+    raw = audit_path.read_text()
+    assert FREE_TEXT not in raw and SECRET not in raw
+    get_, assign, ask, note = audit_lines(audit_path)[-4:]
+    assert get_["route"] == "GET /tasks/{id}" and get_["status"] == 404
+    assert "ids" not in get_ and get_["lens"] == {"task_id": len(FREE_TEXT)}
+    assert assign["status"] == 404 and "ids" not in assign
+    assert assign["lens"] == {"member": len(FREE_TEXT), "title": 1, "instructions": 1}
+    assert "ids" not in ask and ask["lens"] == {"question": 1, "task_id": len(SECRET)}
+    assert note["status"] == 200
+    assert note["ids"] == {"task_id": tid, "member": "alpha"}
+    assert note["lens"] == {"note": 1, "id": len(FREE_TEXT)}
+
+
+def test_failed_auth_line_clips_the_path(client, audit_path):
+    path = "/api/" + "p" * 1000
+    assert client.get(path).status_code == 401
+    line = audit_lines(audit_path)[-1]
+    assert line["kind"] == "auth_failed"
+    assert line["path"] == path[:200]
 
 
 def test_audit_log_records_refusals(client, team, audit_path):

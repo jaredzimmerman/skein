@@ -79,9 +79,14 @@ confirmation before sending, buying or posting anything on {owner}'s behalf.
 
 
 def security_settings(config: Config) -> TransportSecuritySettings:
-    """DNS-rebinding protection: only the configured public hosts and local addresses."""
+    """DNS-rebinding protection: only the configured public hosts and local addresses.
+
+    Allowed Origins are the http(s) origins of those hosts plus ``allowed_origins`` from
+    config (for a connector that sends its own Origin). Requests with no Origin pass.
+    """
     hosts = list(dict.fromkeys([*config.public_hosts, f"127.0.0.1:{config.port}", f"localhost:{config.port}"]))
-    origins = [f"{scheme}://{host}" for host in hosts for scheme in ("https", "http")]
+    derived = [f"{scheme}://{host}" for host in hosts for scheme in ("https", "http")]
+    origins = list(dict.fromkeys([*derived, *config.allowed_origins]))
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=origins
     )

@@ -1,8 +1,9 @@
 """skein's REST mirror of the MCP tools, under ``<base_path>/api``.
 
 JSON in, JSON out. Errors are ``{"error", "code"}`` with not_found 404,
-forbidden 403, invalid 400, conflict 409; anything unexpected is 500
-``{"error": "internal error", "code": "internal"}``. Every rule lives in the
+forbidden 403, invalid 400, conflict 409; a body over 1 MiB is 413
+``{"error": "request body too large", "code": "invalid"}`` before any parsing;
+anything unexpected is 500 ``{"error": "internal error", "code": "internal"}``. Every rule lives in the
 service; handlers only unpack the request and call it as the member the auth
 middleware identified.
 """
@@ -22,6 +23,8 @@ from .errors import SkeinError
 from .service import Skein
 
 STATUS = {"not_found": 404, "forbidden": 403, "invalid": 400, "conflict": 409}
+BODY_MAX = 1024 * 1024  # bytes; larger request bodies are refused unread
+TOO_LARGE = {"error": "request body too large", "code": "invalid"}
 
 # (method, path, who) for every route, relative to <base_path>/api. Also served as help.
 ROUTES: tuple[tuple[str, str, str], ...] = (
@@ -50,8 +53,26 @@ def error_response(code: str, message: str, status: int, headers: dict[str, str]
     return JSONResponse({"error": message, "code": code}, status_code=status, headers=headers)
 
 
+class BodyTooLarge(Exception):
+    """The request body is over :data:`BODY_MAX` (answered 413, nothing parsed)."""
+
+
+async def _read_body(request: Request) -> bytes:
+    """The raw body, refusing more than :data:`BODY_MAX` bytes: a larger Content-Length
+    is refused before reading, and a streamed body as soon as it passes the cap."""
+    declared = request.headers.get("content-length", "").strip()
+    if declared.isdigit() and int(declared) > BODY_MAX:
+        raise BodyTooLarge
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > BODY_MAX:
+            raise BodyTooLarge
+    return bytes(raw)
+
+
 async def _json_body(request: Request) -> dict[str, Any]:
-    raw = await request.body()
+    raw = await _read_body(request)
     if not raw.strip():
         return {}
     try:
@@ -93,6 +114,9 @@ def _endpoint(
                 payload = await _json_body(request) if body else {}
                 value = await run_in_threadpool(call, member, request, payload)
                 response = JSONResponse({wrap: value} if wrap else value)
+            except BodyTooLarge:
+                status, code = 413, "invalid"
+                response = JSONResponse(TOO_LARGE, status_code=413)
             except SkeinError as exc:
                 status, code = STATUS[exc.code], exc.code
                 response = JSONResponse(exc.to_dict(), status_code=status)

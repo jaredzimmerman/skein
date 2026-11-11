@@ -6,12 +6,15 @@ tools read it per request. Nothing else decides identity.
 
 :class:`Audit` writes one JSON line per request or tool call. It records ids,
 outcomes and the *lengths* of text fields, never their content, and never a
-token.
+token. A value in an id position is written only when it is shaped like that
+kind of id (task id, ask id, member name); anything else is recorded by length,
+so free text a caller puts there never reaches the log.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -26,16 +29,27 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .service import NAME_RE
+
 MEMBER_KEY = "skein.member"
 
 # Argument names whose values are free text: the audit log keeps only their length.
 TEXT_FIELDS = frozenset(
     {"title", "instructions", "note", "result", "question", "context", "text", "answer"}
 )
-# Argument names whose values are ids or member names: the audit log keeps them (clipped).
-ID_FIELDS = frozenset({"task_id", "ask_id", "member", "id"})
-ID_MAX = 40
+TASK_ID_RE = re.compile(r"t_[0-9a-f]{10}")
+ASK_ID_RE = re.compile(r"a_[0-9a-f]{10}")
+# Argument names whose values are ids or member names, and the shapes each may take. The
+# audit log keeps a value only if it fully matches one of its key's shapes, else its length.
+ID_SHAPES: dict[str, tuple[re.Pattern[str], ...]] = {
+    "task_id": (TASK_ID_RE,),
+    "ask_id": (ASK_ID_RE,),
+    "member": (NAME_RE,),
+    "id": (TASK_ID_RE, ASK_ID_RE),
+}
+ID_FIELDS = frozenset(ID_SHAPES)
 UA_MAX = 200
+PATH_MAX = 200
 
 UNAUTHORIZED = {"error": "unauthorized"}
 CHALLENGE = {"WWW-Authenticate": 'Bearer realm="skein"'}
@@ -99,7 +113,7 @@ class AuthMiddleware:
                 kind="auth_failed",
                 reason="invalid" if token else "missing",
                 method=scope.get("method"),
-                path=scope.get("path"),
+                path=(scope.get("path") or "")[:PATH_MAX],
                 ua=headers.get("user-agent", "")[:UA_MAX],
                 ip=client[0] if client else None,
             )
@@ -110,13 +124,25 @@ class AuthMiddleware:
         await self.app(scope, receive, send)
 
 
+def id_shaped(key: str, value: str) -> bool:
+    """Whether ``value`` is shaped like the id or name the argument ``key`` holds."""
+    return any(shape.fullmatch(value) for shape in ID_SHAPES.get(key, ()))
+
+
 def summarize(args: dict[str, Any]) -> tuple[dict[str, str], dict[str, int]]:
-    """Split call arguments into ``ids`` (clipped) and ``lens`` (text lengths only)."""
+    """Split call arguments into ``ids`` and ``lens`` (lengths only).
+
+    An id field is kept in ``ids`` only when :func:`id_shaped`; otherwise its length goes
+    to ``lens`` under the same key, like a text field.
+    """
     ids: dict[str, str] = {}
     lens: dict[str, int] = {}
     for key, value in args.items():
         if key in ID_FIELDS and isinstance(value, str) and value:
-            ids[key] = value[:ID_MAX]
+            if id_shaped(key, value):
+                ids[key] = value
+            else:
+                lens[key] = len(value)
         elif key in TEXT_FIELDS and isinstance(value, str):
             lens[key] = len(value)
     return ids, lens
@@ -124,9 +150,8 @@ def summarize(args: dict[str, Any]) -> tuple[dict[str, str], dict[str, int]]:
 
 def result_id(out: Any) -> str | None:
     """The id of the task or ask a call returned, if any."""
-    if isinstance(out, dict) and isinstance(out.get("id"), str):
-        return out["id"][:ID_MAX]
-    return None
+    value = out.get("id") if isinstance(out, dict) else None
+    return value if isinstance(value, str) and id_shaped("id", value) else None
 
 
 def _now_iso() -> str:

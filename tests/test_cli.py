@@ -142,3 +142,25 @@ def test_bad_config_exits_1(tmp_path, capsys, monkeypatch):
     code, out, err = run(bad, capsys, "status")
     assert code == 1
     assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("server", ["", "[server]\nurl_tokens = true\n"])
+def test_serve_runs_uvicorn_without_access_log(tmp_path, capsys, monkeypatch, server):
+    """uvicorn's access log prints query strings (and so ?token=); skein's audit log is the record."""
+    import uvicorn
+
+    monkeypatch.delenv("SKEIN_CONFIG", raising=False)
+    path = tmp_path / "serve.toml"
+    path.write_text(server + f'[storage]\ndb = "{(tmp_path / "skein.db").as_posix()}"\n', encoding="utf-8")
+    seen: dict = {}
+
+    def fake_run(app, **kwargs):
+        seen["app"] = app
+        seen.update(kwargs)
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    code, out, err = run(path, capsys, "serve")
+    assert code == 0
+    assert seen["access_log"] is False
+    assert (seen["host"], seen["port"]) == ("127.0.0.1", 8771)
+    assert callable(seen["app"])

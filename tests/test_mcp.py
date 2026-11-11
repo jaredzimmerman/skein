@@ -228,6 +228,25 @@ def test_tool_calls_are_audited_with_lengths_only(client, team, audit_path):
     assert (members["tool"], members["status"]) == ("skein_members", "forbidden")
 
 
+def test_free_text_in_an_id_position_is_audited_as_a_length(client, team, audit_path):
+    free = "Plan: the violet umbrella for the weekend"
+    assert call(client, team["alpha"], "skein_get_task", task_id=free)["code"] == "not_found"
+    # name-shaped text is still not an ask id
+    assert call(client, team["alpha"], "skein_get_ask", ask_id=SECRET)["code"] == "not_found"
+    assert call(client, team["lead"], "skein_assign", member=free, title="t", instructions="i")["code"] == "not_found"
+    ask_id = call(client, team["alpha"], "skein_ask", question="q")["id"]
+    call(client, team["lead"], "skein_answer", ask_id=ask_id, answer="a")
+
+    raw = audit_path.read_text()
+    assert free not in raw and SECRET not in raw
+    get_task, get_ask, assign, ask, answer = [json.loads(l) for l in raw.splitlines()][-5:]
+    assert "ids" not in get_task and get_task["lens"] == {"task_id": len(free)}
+    assert "ids" not in get_ask and get_ask["lens"] == {"ask_id": len(SECRET)}
+    assert "ids" not in assign and assign["lens"] == {"member": len(free), "title": 1, "instructions": 1}
+    assert ask["ids"] == {"id": ask_id}
+    assert answer["ids"] == {"ask_id": ask_id} and answer["lens"] == {"answer": 1}
+
+
 # -- identity per request, concurrently ---------------------------------------------
 
 
