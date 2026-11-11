@@ -211,12 +211,12 @@ approved 2026-11-10; pushed every checkpoint) · Author: Jared Zimmerman, no AI 
 ## Tasks
 | id | title | tier | deps | files | acceptance | status |
 |---|---|---|---|---|---|---|
-| T01 | Store, service, tokens, errors + tests | opus | – | src/skein/{store,service,tokens,errors}.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | todo |
-| T02 | Config loader + example + tests | haiku | – | src/skein/config.py, skein.example.toml, tests/test_config.py | `uv run pytest tests/test_config.py -q` | todo |
+| T01 | Store, service, tokens, errors + tests | opus | – | src/skein/{store,service,tokens,errors}.py, tests/test_service.py | `uv run pytest tests/test_service.py -q` | done |
+| T02 | Config loader + example + tests | haiku | – | src/skein/config.py, skein.example.toml, tests/test_config.py | `uv run pytest tests/test_config.py -q` | done |
 | T03 | HTTP app: auth, MCP tools, REST, audit + tests | opus | T01,T02 | src/skein/{app,auth,mcp_tools,rest}.py, tests/test_http.py, tests/test_mcp.py | `uv run pytest tests/test_http.py tests/test_mcp.py -q` | todo |
 | T04 | CLI + tests | haiku | T01,T02 | src/skein/cli.py, tests/test_cli.py | `uv run pytest tests/test_cli.py -q` | todo |
-| T05 | README, docs/architecture.md, deploy/, LICENSE | haiku | – | README.md, docs/architecture.md, deploy/*, LICENSE | `test -s README.md && test -s docs/architecture.md && test -s LICENSE && ls deploy` | todo |
-| T06 | Agent folders: claude, muse, _template | sonnet | – | agents/** | `find agents -name '*.md' | wc -l` ≥ 10 | todo |
+| T05 | README, docs/architecture.md, deploy/, LICENSE | haiku | – | README.md, docs/architecture.md, deploy/*, LICENSE | `test -s README.md && test -s docs/architecture.md && test -s LICENSE && ls deploy` | done |
+| T06 | Agent folders: claude, muse, _template | sonnet | – | agents/** | `find agents -name '*.md' | wc -l` ≥ 10 | done |
 | T07 | Final integration review + full suite | fable | T01–T06 | – | `uv run pytest -q` | todo |
 
 Status values: todo · in-progress · review · done · blocked:human · escalated
