@@ -151,6 +151,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         print(f"skein: {exc}", file=sys.stderr)
         return 1
+    except FileNotFoundError as exc:
+        print(f"skein: config file not found: {exc.filename or exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

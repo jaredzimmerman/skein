@@ -6,7 +6,7 @@
 #   sudo install -d -o root -g skein -m 0750 /etc/skein
 #   sudo cp skein.example.toml /etc/skein/skein.toml   # then edit: db and audit_log under /var/lib/skein
 #   sudo chown root:skein /etc/skein/skein.toml && sudo chmod 0640 /etc/skein/skein.toml
-#   sudo -u skein /opt/skein/.venv/bin/skein --config /etc/skein/skein.toml init
+#   sudo -u skein sh -c 'umask 077; /opt/skein/.venv/bin/skein --config /etc/skein/skein.toml init'
 #   sudo -u skein /opt/skein/.venv/bin/skein --config /etc/skein/skein.toml member add claude
 #   sudo cp skein.service /etc/systemd/system/ && sudo systemctl daemon-reload
 #   sudo systemctl enable --now skein

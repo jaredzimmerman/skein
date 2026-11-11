@@ -141,7 +141,7 @@ When `storage.audit_log` is set, each REST call, each MCP tool call and each fai
 one JSON line. The line holds the time, member, tool or route, relevant ids, status, and the length
 of each text field. An id is written only when it has the form skein issues (task ids, ask ids and
 member names); anything else in an id position is recorded by its length. The text itself is never
-logged. MCP `initialize` and `tools/list`, the help page, and 404 and 405 responses are not
+logged. MCP `initialize` and `tools/list`, the help page, and requests to unknown routes or with the wrong method are not
 audited. A failed authentication logs the method, the path (clipped to 200 characters), user agent
 and client address, and never the token.
 

@@ -164,3 +164,12 @@ def test_serve_runs_uvicorn_without_access_log(tmp_path, capsys, monkeypatch, se
     assert seen["access_log"] is False
     assert (seen["host"], seen["port"]) == ("127.0.0.1", 8771)
     assert callable(seen["app"])
+
+
+def test_missing_explicit_config_is_one_line_error(tmp_path, capsys):
+    from skein.cli import main
+    missing = tmp_path / "nope.toml"
+    assert main(["--config", str(missing), "status"]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("skein: config file not found")
+    assert "Traceback" not in err

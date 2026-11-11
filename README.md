@@ -136,11 +136,11 @@ that is too large) and `conflict` (409).
   sign-in writes one JSON line with the time, the member, the tool or route, the ids involved, the
   status, and the lengths of text fields. The text itself is never written. An id is written only
   when it has the form skein issues; anything else is recorded by length. MCP `initialize` and
-  `tools/list`, the help page, and 404 and 405 responses are not logged. A failed sign-in records
+  `tools/list`, the help page, and requests to unknown routes or with the wrong method are not logged. A failed sign-in records
   the method, the path (clipped to 200 characters), user agent and client address, but never the
   token that was presented.
 - **No server access log.** `skein serve` runs with uvicorn's access log off, so request lines,
-  including any query string, are never written by skein. The audit log is the only record.
+  including any query string, are never written by skein. The audit log is the only record skein keeps; the MCP SDK may print a refused Host or Origin header value to the server's stderr (never a token).
 - **Host and Origin checks.** The MCP endpoint refuses Host headers that are not listed in
   `public_hosts`, which blocks DNS rebinding. It also refuses an `Origin` header unless the origin
   comes from `public_hosts` or is listed in `allowed_origins`. Add your public hostname to

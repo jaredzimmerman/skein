@@ -44,3 +44,4 @@
 2026-11-11T05:53:39Z | T09: result written
 2026-11-11T05:56:34Z | T09: review r1 approve
 2026-11-11T06:00:38Z | T12: re-review approve
+2026-11-11T06:01:34Z | T12 lows: CLI missing-config message, url_tokens proxy note, audit wording, init umask

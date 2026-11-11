@@ -9,7 +9,7 @@ Verification status: nothing here is verified against Meta documentation. The se
 - URL: `https://skein.example.com/mcp`
 - Transport: streamable HTTP (stateless, JSON responses).
 - Auth: `Authorization: Bearer <token>` (`X-API-Key: <token>` also works).
-- Unverified: where in Muse a custom MCP connector is added, and whether it accepts a custom header or bearer token. Check: can the connector form take a fixed header? If not, use `url_tokens = true` and `https://skein.example.com/mcp?token=<token>`; the token then appears in URLs and logs, so use a dedicated member and rotate it (`skein member rotate muse`).
+- Unverified: where in Muse a custom MCP connector is added, and whether it accepts a custom header or bearer token. Check: can the connector form take a fixed header? If not, use `url_tokens = true` and `https://skein.example.com/mcp?token=<token>`; the token then appears in URLs and logs, so use a dedicated member and rotate it (`skein member rotate muse`). Turn the reverse proxy's access log off for skein's location, or strip query strings from it, before you use this.
 - Quirks the server already handles: a GET with `Accept: text/event-stream` gets 405 at once, and POST Accept headers are normalized.
 
 ## Option 2: REST routes
