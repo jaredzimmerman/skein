@@ -13,3 +13,4 @@ skein.toml
 .env
 .env.*
 .DS_Store
+*.local.md

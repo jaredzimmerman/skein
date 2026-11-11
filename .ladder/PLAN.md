@@ -220,4 +220,4 @@ approved 2026-11-10; pushed every checkpoint) · Author: Jared Zimmerman, no AI 
 | T07 | Final integration review + full suite | fable | T01–T06 | – | `uv run pytest -q` | todo |
 
 Status values: todo · in-progress · review · done · blocked:human · escalated
-Out of scope for v1: migrating the live bridge's queue.db, deploying, PyPI publishing.
+Out of scope for v1: migrating the live bridge queue.db, PyPI publishing. A private deployment is approved (after T07); its details stay out of the repo.
