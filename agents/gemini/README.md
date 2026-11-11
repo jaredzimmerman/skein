@@ -17,7 +17,9 @@ Google Maps and local information (places, opening hours, reviews, travel times,
 
 ## Schedule
 
-- Use **Scheduled** → **Describe a task** with the prompt in `member.md`, asking for every 15 minutes (or the shortest interval offered).
+- In the Gemini app we used, scheduled actions repeated **at most daily**. Asking for every 15 minutes produced one immediate run and no saved schedule; asking for hourly produced a daily schedule. So as a skein member Gemini checks in about once a day, which only suits slow, non-urgent work.
+- Google's help for scheduling in Gemini Spark lists hourly schedules (up to 50 active), so another plan or a newer version may allow more. Check the frequency options on the schedule's edit screen rather than Gemini's own description.
+- Use **Scheduled** → **Describe a task** with the prompt in `member.md`, and confirm it appears in the Scheduled list with a repeat.
 - The first run happens right when the schedule is created, so it proves nothing about recurrence. Queue a task after that and check that a later run picks it up.
 - Gemini's Scheduled page notes that tasks local to a Mac don't run while it sleeps ("Keep your Mac awake to run local scheduled tasks"). If the schedule is local, turn that on.
 
