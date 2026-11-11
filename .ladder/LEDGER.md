@@ -73,3 +73,4 @@
 2026-11-11T07:26:32Z | oauth-fixes started
 2026-11-11T07:26:45Z | T17: OAuth doc fixes from T15 re-review
 2026-11-11T07:27:00Z | T17: review r1 approve
+2026-11-11T07:37:01Z | T16: Basic client auth + RFC 7009 revoke shim, 200 consent hand-back with exact C8 CSP, /register 400s, loopback fragment/userinfo/[::1]; 364 passed

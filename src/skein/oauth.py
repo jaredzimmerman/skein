@@ -9,7 +9,7 @@ keep working everywhere.
 app  → GET  <base>/authorize        SDK handler → authorize(): store a pending request (10 min)
      ← 302  <public_url>/oauth/consent?req=<id>
 you  → POST <base>/oauth/consent    member token → one-time code (10 min, hashed)
-     ← 303  <redirect_uri>?code=…&state=…
+     ← 200  page: meta refresh + Continue link → <redirect_uri>?code=…&state=…
 app  → POST <base>/token            SDK handler → skeino_… access + skeinr_… refresh tokens
 app  → <base>/mcp, <base>/api/…     Bearer skeino_… → AuthMiddleware → authenticate() → member
 ```
@@ -19,7 +19,11 @@ authorize, token, register and revoke handlers, ``build_metadata``, the metadata
 handlers and ``ClientAuthenticator``. They are mounted here rather than through
 ``create_auth_routes`` because that mounts at the root path and builds a
 ``ClientAuthenticator`` that compares plaintext secrets, while skein keeps only secret
-hashes (see :class:`HashedSecretAuthenticator`, which wraps the SDK's).
+hashes (see :class:`HashedSecretAuthenticator`, which wraps the SDK's). Small ASGI
+shims in front of the SDK handlers cover what they don't: HTTP Basic client
+authentication without a ``client_id`` in the form and RFC 7009 revocation by a public
+client (:class:`_ClientAuthForm`), and /register bodies the SDK would answer with a 500
+(:class:`_RegisterBody`).
 
 Where the rules live: the grant rules (expiry, bad-attempt limit, what a code or token
 is bound to, single use, refresh rotation, trust-on-first-use locking) are in this
@@ -42,6 +46,7 @@ from __future__ import annotations
 import base64
 import binascii
 import html
+import json
 import math
 import re
 import secrets
@@ -49,7 +54,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 import anyio.to_thread
 from mcp.server.auth.handlers.authorize import AuthorizationHandler
@@ -80,10 +85,12 @@ from mcp.shared.auth import (
     ProtectedResourceMetadata,
 )
 from pydantic import AnyHttpUrl, AnyUrl, Field, ValidationError
-from starlette.datastructures import FormData
+from starlette.datastructures import FormData, Headers
+from starlette.exceptions import HTTPException
+from starlette.formparsers import MultiPartException
 from starlette.middleware.cors import CORSMiddleware
-from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.requests import ClientDisconnect, Request
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route, request_response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -109,9 +116,12 @@ STATE_MAX = 2000
 NAME_MAX = 100
 AUTH_METHODS = ("none", "client_secret_post", "client_secret_basic")
 CHALLENGE_RE = re.compile(r"[A-Za-z0-9_-]{43}")  # S256: base64url of 32 bytes, no padding
-_CSP_SOURCE_RE = re.compile(r"[a-z][a-z0-9+.-]*:(//[a-z0-9.:\[\]-]+)?")
+FORM_TYPE = "application/x-www-form-urlencoded"
 
 PAGE_HEADERS = {
+    # exactly C8: the consent form posts only back here, and the hand-back to the app is a
+    # page (meta refresh + link), which form-action does not govern
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
     "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
     "Pragma": "no-cache",
@@ -155,15 +165,19 @@ def _member_for_token(db: Any, token: str) -> str | None:
     return row["name"]
 
 
-def _basic_secret(header: str) -> str | None:
-    """The secret in ``Authorization: Basic …``, decoded the way the SDK decodes it."""
+def _basic_credentials(header: str) -> tuple[str, str] | None:
+    """(client_id, secret) from ``Authorization: Basic …``, decoded the way the SDK decodes
+    it (RFC 6749 §2.3.1: each part form-encoded, joined by ``:``, then base64), or None."""
+    if not header.startswith("Basic "):
+        return None
     try:
         decoded = base64.b64decode(header[6:]).decode("utf-8")
     except (ValueError, UnicodeDecodeError, binascii.Error):
         return None
     if ":" not in decoded:
         return None
-    return unquote(decoded.split(":", 1)[1])
+    client_id, secret = decoded.split(":", 1)
+    return unquote(client_id), unquote(secret)
 
 
 def _same_url(a: str, b: str) -> bool:
@@ -174,7 +188,12 @@ def _same_url(a: str, b: str) -> bool:
 
 
 def _loopback_any_port(registered: str, requested: str) -> bool:
-    """RFC 8252 §7.3: a loopback http redirect URI matches whatever port the app opened."""
+    """RFC 8252 §7.3: a loopback http redirect URI matches whatever port the app opened.
+
+    Everything else must match, and the requested URI may not add a fragment or userinfo
+    (registration refuses both; see ``check_redirect_uri``). pydantic keeps an IPv6 host in
+    brackets (``[::1]``), which :func:`is_loopback` accepts.
+    """
     try:
         r, q = AnyUrl(registered), AnyUrl(requested)
     except ValidationError:
@@ -185,28 +204,14 @@ def _loopback_any_port(registered: str, requested: str) -> bool:
         and (r.host or "").lower() == (q.host or "").lower()
         and r.path == q.path
         and r.query == q.query
+        and q.fragment is None
+        and q.username is None
+        and q.password is None
     )
 
 
 def redirect_allowed(requested: str, registered: list[str]) -> bool:
     return any(_same_url(u, requested) or _loopback_any_port(u, requested) for u in registered)
-
-
-def _csp_source(uri: str) -> str | None:
-    """The CSP source for where the consent form's redirect goes (origin, or ``scheme:``)."""
-    try:
-        parts = urlsplit(uri)
-        host = parts.hostname
-        port = parts.port
-    except ValueError:
-        return None
-    scheme = parts.scheme.lower()
-    if scheme in ("http", "https") and host:
-        host = f"[{host}]" if ":" in host else host
-        source = f"{scheme}://{host}" + (f":{port}" if port else "")
-    else:
-        source = f"{scheme}:"
-    return source if _CSP_SOURCE_RE.fullmatch(source) else None
 
 
 def _where(uri: str) -> str:
@@ -287,6 +292,8 @@ class HashedSecretAuthenticator(ClientAuthenticator):
     unmatchable value otherwise; the SDK then does every check as usual. A confidential
     client may authenticate with ``client_secret_basic`` or ``client_secret_post``
     (both are advertised): the method is taken from whether a Basic header is present.
+    The SDK finds the client by the form's ``client_id``; :class:`_ClientAuthForm` puts
+    the Basic header's there when the form has none.
     """
 
     def __init__(self, oauth: "SkeinOAuth") -> None:
@@ -297,7 +304,11 @@ class HashedSecretAuthenticator(ClientAuthenticator):
         form = await request.form()  # Starlette caches it for the SDK's own reads
         header = request.headers.get("authorization", "")
         basic = header.startswith("Basic ")
-        presented = _basic_secret(header) if basic else (_form_str(form, "client_secret") or None)
+        if basic:
+            credentials = _basic_credentials(header)
+            presented = credentials[1] if credentials else None
+        else:
+            presented = _form_str(form, "client_secret") or None
         oauth = self.oauth
 
         class OneRequest:
@@ -312,7 +323,7 @@ class HashedSecretAuthenticator(ClientAuthenticator):
 
 @dataclass
 class _Outcome:
-    kind: str  # form | expired | locked | conflict | redirect
+    kind: str  # form | expired | locked | conflict | approved | denied (the last two: url)
     view: dict[str, Any] = field(default_factory=dict)
     error: str = ""
     url: str = ""
@@ -514,7 +525,7 @@ class SkeinOAuth:
             db.delete_oauth_pending(req)
         self.audit.log(kind="oauth", event="consent_denied", client_id=pending["client_id"])
         url = construct_redirect_uri(pending["redirect_uri"], error="access_denied", state=pending["state"])
-        return _Outcome("redirect", url=url)
+        return _Outcome("denied", url=url)
 
     def _decide(self, req: str, token: str) -> _Outcome:
         """Approve as the member whose fixed token this is, or count a token that matches no
@@ -577,7 +588,7 @@ class SkeinOAuth:
                 db.delete_oauth_pending(req)
                 event = {"event": "consent_ok", "client_id": cid, "member": member}
                 url = construct_redirect_uri(pending["redirect_uri"], code=code, state=pending["state"])
-                outcome = _Outcome("redirect", url=url)
+                outcome = _Outcome("approved", url=url)
         self.audit.log(kind="oauth", **event)
         return outcome
 
@@ -767,12 +778,11 @@ class SkeinOAuth:
         return self._render(outcome, req)
 
     def _render(self, outcome: _Outcome, req: str) -> Response:
-        if outcome.kind == "redirect":
-            return RedirectResponse(outcome.url, status_code=303, headers=PAGE_HEADERS)
+        if outcome.kind in ("approved", "denied"):
+            return self._handback(outcome)
         if outcome.kind == "form":
             return self._page(400 if outcome.error else 200, "Connect an app to skein",
-                              self._form_html(outcome.view, req, outcome.error),
-                              redirect_uri=outcome.view["redirect_uri"])
+                              self._form_html(outcome.view, req, outcome.error))
         if outcome.kind == "locked":
             return self._page(400, "Sign-in stopped", "<p>Too many tokens didn't match, so this sign-in "
                               "was stopped. Start again from your app.</p>")
@@ -783,6 +793,25 @@ class SkeinOAuth:
                               "from the app, or ask the owner to check <code>skein oauth client list</code>.</p>")
         return self._page(400, "Sign-in expired", "<p>This sign-in request has expired or was already "
                           "used. Start again from your app.</p>")
+
+    def _handback(self, outcome: _Outcome) -> HTMLResponse:
+        """Send the browser on to the app (code, or ``access_denied``) with a page, not a 303.
+
+        Browsers apply ``form-action`` to a redirect that follows a form POST, so under C8's
+        ``form-action 'self'`` a 303 to the app would be blocked. A meta refresh is not a form
+        submission, and the Continue link covers a browser that won't follow the refresh on
+        its own (an app's private-use scheme, say). The address is escaped like every other
+        value on these pages; ``no-store`` keeps the page, and the code in it, out of caches.
+        """
+        url = html.escape(outcome.url)
+        where = html.escape(_where(outcome.url))
+        if outcome.kind == "approved":
+            title, done = "Signed in", "You approved this sign-in."
+        else:
+            title, done = "Sign-in denied", "You denied this sign-in."
+        body = (f"<p>{done} Returning you to <strong>{where}</strong>.</p>\n"
+                f'<p><a href="{url}">Continue</a></p>')
+        return self._page(200, title, body, head=f'<meta http-equiv="refresh" content="0;url={url}">')
 
     def _form_html(self, view: dict[str, Any], req: str, error: str) -> str:
         e = html.escape
@@ -810,23 +839,15 @@ started this sign-in from that app just now.</p>
 <p class="small">App id: <code>{e(view["client_id"])}</code></p>"""
 
     @staticmethod
-    def _page(status: int, title: str, body: str, redirect_uri: str | None = None) -> HTMLResponse:
-        # Browsers apply form-action to the redirect that follows the POST, so the form's
-        # redirect target is listed too; without it Chrome blocks the hand-back to the app.
-        form_action = "'self'"
-        source = _csp_source(redirect_uri) if redirect_uri else None
-        if source:
-            form_action += f" {source}"
-        csp = (
-            f"default-src 'none'; style-src 'unsafe-inline'; form-action {form_action}; "
-            "frame-ancestors 'none'; base-uri 'none'"
-        )
+    def _page(status: int, title: str, body: str, head: str = "") -> HTMLResponse:
+        """A consent page; ``body`` and ``head`` are already escaped HTML."""
         page = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
+{head}
 <title>{html.escape(title)}</title>
 <style>
 body {{ font: 16px/1.5 system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1d1d1b; }}
@@ -855,7 +876,7 @@ code {{ font-size: .9em; }}
 </main></body>
 </html>
 """
-        return HTMLResponse(page, status_code=status, headers={**PAGE_HEADERS, "Content-Security-Policy": csp})
+        return HTMLResponse(page, status_code=status, headers=PAGE_HEADERS)
 
     # -- metadata and routes ------------------------------------------------------------------
 
@@ -916,6 +937,9 @@ code {{ font-size: .9em; }}
             ProtectedResourceMetadataHandler(self.protected_resource_metadata()).handle, ["GET", "OPTIONS"]
         )
         server_paths, resource_paths = self._metadata_paths()
+        token_app = _ClientAuthForm(request_response(token.handle))
+        revoke_app = _ClientAuthForm(request_response(revoke.handle), revoke=True)
+        register_app = _RegisterBody(request_response(register.handle))
         return [
             *(Route(p, endpoint=as_meta, methods=["GET", "OPTIONS"]) for p in server_paths),
             *(Route(p, endpoint=pr_meta, methods=["GET", "OPTIONS"]) for p in resource_paths),
@@ -926,20 +950,20 @@ code {{ font-size: .9em; }}
             ),
             Route(
                 f"{b}/token",
-                endpoint=_cors(self._audited(_limited(request_response(token.handle)), "token"), ["POST", "OPTIONS"]),
+                endpoint=_cors(self._audited(_limited(token_app), "token"), ["POST", "OPTIONS"]),
                 methods=["POST", "OPTIONS"],
             ),
             Route(
                 f"{b}/register",
                 endpoint=_cors(
-                    self._rate_limited(self._audited(_limited(request_response(register.handle)), "register")),
+                    self._rate_limited(self._audited(_limited(register_app), "register")),
                     ["POST", "OPTIONS"],
                 ),
                 methods=["POST", "OPTIONS"],
             ),
             Route(
                 f"{b}/revoke",
-                endpoint=_cors(self._audited(_limited(request_response(revoke.handle)), "revoke"), ["POST", "OPTIONS"]),
+                endpoint=_cors(self._audited(_limited(revoke_app), "revoke"), ["POST", "OPTIONS"]),
                 methods=["POST", "OPTIONS"],
             ),
             Route(
@@ -996,6 +1020,159 @@ class _RegisterRateLimit:
                 await response(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+
+async def _read_body(receive: Receive) -> tuple[bytes, Message | None]:
+    """The whole request body (already size-capped by :func:`_limited`), plus the message
+    that cut it short (a disconnect), if one did."""
+    chunks: list[bytes] = []
+    while True:
+        message = await receive()
+        if message["type"] != "http.request":
+            return b"".join(chunks), message
+        chunks.append(message.get("body", b""))
+        if not message.get("more_body", False):
+            return b"".join(chunks), None
+
+
+def _replay(body: bytes, cut: Message | None, receive: Receive) -> Receive:
+    """A ``receive`` that hands the app ``body`` again (and the disconnect, if any)."""
+    queued: deque[Message] = deque([{"type": "http.request", "body": body, "more_body": cut is not None}])
+    if cut is not None:
+        queued.append(cut)
+
+    async def replay() -> Message:
+        return queued.popleft() if queued else await receive()
+
+    return replay
+
+
+class _ClientAuthForm:
+    """Client authentication as RFC 6749 §2.3.1 and RFC 7009 §2.1 allow it, in front of the
+    SDK's token and revoke handlers (wrapped, not forked).
+
+    The SDK finds the client by the form's ``client_id`` only, and its revocation request
+    model requires a ``client_secret`` field. Before the SDK reads the form, this fills it in
+    from the request:
+
+    - a valid ``Authorization: Basic`` header and no ``client_id`` in the form: the header's
+      id goes in, and its secret too if the form has no ``client_secret``. A form
+      ``client_id`` that differs from the header's gets 401 ``invalid_client``.
+    - /revoke with no ``client_secret`` field (a public client): an empty one goes in. A
+      client that holds a secret is still refused, because the authenticator runs before
+      the SDK looks at the form, and an empty secret matches nothing.
+
+    Who is authenticated, and how, is unchanged: the secret check stays in
+    :class:`HashedSecretAuthenticator`. Only form-encoded bodies (what RFC 6749 §4.1.3 and
+    §6 send) are touched, and the form is parsed by Starlette, as the SDK parses it.
+    """
+
+    def __init__(self, app: ASGIApp, revoke: bool = False) -> None:
+        self.app, self.revoke = app, revoke
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        headers = Headers(scope=scope)
+        content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if scope["type"] != "http" or scope.get("method") != "POST" or content_type != FORM_TYPE:
+            await self.app(scope, receive, send)
+            return
+        body, cut = await _read_body(receive)
+        form: FormData | None = None
+        if cut is None:
+            try:
+                form = await Request(scope, _replay(body, None, receive)).form()
+            except (HTTPException, MultiPartException, ClientDisconnect):
+                pass  # the SDK will meet the same problem and answer as it did before
+        added = {} if form is None else self._added(form, headers.get("authorization", ""))
+        if added is None:
+            response = JSONResponse(
+                {"error": "invalid_client",
+                 "error_description": "client_id in the form does not match the Authorization header"},
+                status_code=401,
+                headers={"WWW-Authenticate": 'Basic realm="skein"', "Cache-Control": "no-store", "Pragma": "no-cache"},
+            )
+            await response(scope, receive, send)
+            return
+        if form is not None and added:
+            kept = [(k, v) for k, v in form.multi_items() if k not in added]
+            body = urlencode([*kept, *added.items()]).encode("ascii")
+            scope = {
+                **scope,
+                "headers": [(k, v) for k, v in scope["headers"] if k.lower() != b"content-length"]
+                + [(b"content-length", str(len(body)).encode("ascii"))],
+            }
+        await self.app(scope, _replay(body, cut, receive), send)
+
+    def _added(self, form: FormData, authorization: str) -> dict[str, str] | None:
+        """Fields to add to the form, or None when the form and Basic ids disagree."""
+        added: dict[str, str] = {}
+        credentials = _basic_credentials(authorization)
+        if credentials is not None and credentials[0]:
+            basic_id, basic_secret = credentials
+            form_ids = {v for v in form.getlist("client_id") if isinstance(v, str) and v}
+            if form_ids - {basic_id}:
+                return None
+            if not form_ids:  # replaces any empty client_id fields
+                added["client_id"] = basic_id
+                if "client_secret" not in form:
+                    added["client_secret"] = basic_secret
+        if self.revoke and "client_secret" not in form and "client_secret" not in added:
+            added["client_secret"] = ""
+        return added
+
+
+class _RegisterBody:
+    """/register bodies the SDK handler would answer with a 500 → 400 ``invalid_client_metadata``
+    (RFC 7591 §3.2.2).
+
+    The SDK reads the body with ``request.json()`` and doesn't catch a parse error. It also
+    passes on strings that are valid JSON but not Unicode text (a lone surrogate such as
+    ``"\\ud800"``), which then fail at the store's insert or when the SDK writes its JSON
+    response. Both are refused here first; everything else is left to the SDK.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            await self.app(scope, receive, send)
+            return
+        body, cut = await _read_body(receive)
+        problem = None if cut is not None else _metadata_problem(body)
+        if problem is not None:
+            response = JSONResponse(
+                {"error": "invalid_client_metadata", "error_description": problem},
+                status_code=400,
+                headers={"Cache-Control": "no-store"},
+            )
+            await response(scope, receive, send)
+            return
+        await self.app(scope, _replay(body, cut, receive), send)
+
+
+def _metadata_problem(body: bytes) -> str | None:
+    """Why a registration body can't be client metadata, before any field is looked at."""
+    try:
+        data = json.loads(body)  # as Starlette's request.json() does
+    except (ValueError, RecursionError):  # bad JSON or bytes; nested too deep to parse
+        return "the request body must be a JSON object"
+    if not isinstance(data, dict):
+        return "the request body must be a JSON object"
+    stack: list[Any] = [data]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                return "client metadata must be Unicode text (no lone surrogates)"
+        elif isinstance(value, dict):
+            stack.extend(value.keys())
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return None
 
 
 def _limited(app: ASGIApp) -> ASGIApp:

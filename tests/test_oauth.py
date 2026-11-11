@@ -9,6 +9,7 @@ import hashlib
 import html
 import json
 import logging
+import re
 import secrets
 import sqlite3
 from urllib.parse import parse_qs, urlsplit
@@ -22,7 +23,7 @@ from skein import oauth as oauth_mod
 from skein.app import create_app
 from skein.cli import main
 from skein.config import Config, load_config
-from skein.service import Skein
+from skein.service import Skein, is_loopback
 from skein.store import Store
 
 ORIGIN = "http://127.0.0.1:8771"
@@ -33,10 +34,18 @@ PRM_URL = "https://skein.example.com/.well-known/oauth-protected-resource/skein/
 REDIRECT = "https://app.example.com/callback"
 PLAIN_CHALLENGE = 'Bearer realm="skein"'
 OAUTH_CHALLENGE = f'Bearer realm="skein", resource_metadata="{PRM_URL}"'
+C8_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"
+REFRESH_RE = re.compile(r'<meta http-equiv="refresh" content="0;url=([^"]*)">')
+CONTINUE_RE = re.compile(r'<a href="([^"]*)">Continue</a>')
 
 
 def bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def basic(client_id: str, secret: str) -> dict[str, str]:
+    """RFC 6749 §2.3.1 client authentication."""
+    return {"Authorization": "Basic " + base64.b64encode(f"{client_id}:{secret}".encode()).decode()}
 
 
 def pkce() -> tuple[str, str]:
@@ -116,9 +125,23 @@ def consent(client: TestClient, req: str, token: str, decision: str = "approve")
     )
 
 
+def handback(response: httpx.Response) -> str:
+    """Where a decided consent sends the browser: a 200 no-store page with a meta refresh and
+    a Continue link to the same address (not a 303, so C8's ``form-action 'self'`` holds)."""
+    assert response.status_code == 200, response.text
+    assert "location" not in response.headers
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-security-policy"] == C8_CSP
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    refresh_url = REFRESH_RE.findall(response.text)
+    continue_url = CONTINUE_RE.findall(response.text)
+    assert len(refresh_url) == 1 and continue_url == refresh_url, response.text
+    return html.unescape(refresh_url[0])
+
+
 def code_from(response: httpx.Response, redirect_uri: str = REDIRECT, state: str = "st-123") -> str:
-    assert response.status_code == 303, response.text
-    location = response.headers["location"]
+    location = handback(response)
     assert location.startswith(redirect_uri + "?")
     q = query(location)
     assert q["state"] == state
@@ -409,10 +432,41 @@ def test_deny_redirects_with_access_denied(client, team):
     _, challenge = pkce()
     req = consent_req(authorize(client, reg["client_id"], challenge))
     r = consent(client, req, "", decision="deny")
-    assert r.status_code == 303
-    q = query(r.headers["location"])
-    assert q == {"error": "access_denied", "state": "st-123"}
+    location = handback(r)
+    assert location.startswith(REDIRECT + "?")
+    assert query(location) == {"error": "access_denied", "state": "st-123"}
     assert client.get(f"{BASE}/oauth/consent", params={"req": req}).status_code == 400
+
+
+def test_handback_page_escapes_the_redirect(client, team):
+    """The address goes into an attribute twice; a hostile state and a query with ``&`` and
+    ``'`` come out escaped, and the browser reads back exactly the redirect skein built."""
+    redirect = "https://app.example.com/it's/cb?next=a&mode=x"
+    reg = register(client, redirect_uris=[redirect])
+    verifier, challenge = pkce()
+    state = '"><script>alert(1)</script>'
+    req = consent_req(authorize(client, reg["client_id"], challenge, redirect_uri=redirect, state=state))
+    r = consent(client, req, team["alpha"])
+    assert "<script>" not in r.text and "it's" not in r.text
+    assert "&amp;" in REFRESH_RE.findall(r.text)[0]
+    location = handback(r)
+    q = query(location)
+    assert q["state"] == state and q["next"] == "a" and q["mode"] == "x"
+    assert location.startswith("https://app.example.com/it's/cb?")
+    assert exchange(client, reg, q["code"], verifier, redirect_uri=redirect).status_code == 200
+
+
+def test_handback_to_a_private_use_scheme(client, team):
+    """Apps on a device get the same page; the Continue link is there if a browser will not
+    follow a refresh to an app scheme on its own."""
+    app_redirect = "com.example.app:/oauth/callback"
+    reg = register(client, redirect_uris=[app_redirect], token_endpoint_auth_method="none")
+    verifier, challenge = pkce()
+    req = consent_req(authorize(client, reg["client_id"], challenge, redirect_uri=app_redirect))
+    code = code_from(consent(client, req, team["beta"]), redirect_uri=app_redirect)
+    r = exchange(client, reg, code, verifier, redirect_uri=app_redirect)
+    assert r.status_code == 200, r.text
+    assert whoami_rest(client, r.json()["access_token"]).json()["member"] == "beta"
 
 
 def test_five_bad_tokens_end_the_request(client, team, audit_path):
@@ -453,16 +507,16 @@ def test_consent_page_headers_and_escaping(client, team):
     reg = register(client, client_name='<script>alert("x")</script> & Co')
     _, challenge = pkce()
     req = consent_req(authorize(client, reg["client_id"], challenge))
+    _, other_challenge = pkce()
+    denied_req = consent_req(authorize(client, reg["client_id"], other_challenge))
     for r in (
         client.get(f"{BASE}/oauth/consent", params={"req": req}),
         consent(client, req, "skein_wrong"),
         client.get(f"{BASE}/oauth/consent", params={"req": "nope"}),
+        consent(client, denied_req, "", decision="deny"),  # the hand-back page
     ):
-        csp = r.headers["content-security-policy"]
-        assert "default-src 'none'" in csp
-        assert "style-src 'unsafe-inline'" in csp
-        assert "form-action 'self'" in csp
-        assert "script-src" not in csp
+        # exactly C8: the form posts only here, and the hand-back is not a form submission
+        assert r.headers["content-security-policy"] == C8_CSP
         assert r.headers["x-frame-options"] == "DENY"
         assert r.headers["cache-control"] == "no-store"
         assert r.headers["referrer-policy"] == "no-referrer"
@@ -471,9 +525,6 @@ def test_consent_page_headers_and_escaping(client, team):
         assert "http://" not in r.text.replace("http://www.w3.org", "")  # no external resources
     page = client.get(f"{BASE}/oauth/consent", params={"req": req}).text
     assert "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; Co" in page
-    # the form may post back here and the browser may follow the redirect to the client
-    csp = client.get(f"{BASE}/oauth/consent", params={"req": req}).headers["content-security-policy"]
-    assert "form-action 'self' https://app.example.com" in csp
 
 
 def test_consent_page_for_unknown_request(client):
@@ -592,6 +643,181 @@ def test_revoke_ends_the_grant(client, team):
     assert r.status_code == 200
     assert whoami_rest(client, tokens["access_token"]).status_code == 401
     assert refresh(client, reg, tokens["refresh_token"]).status_code == 400
+
+
+@pytest.mark.parametrize("token_kind", ["access_token", "refresh_token"])
+def test_public_client_revokes_with_token_and_client_id_only(client, team, token_kind):
+    """RFC 7009 §2.1 as a public client sends it: no client_secret field at all."""
+    reg = register(client, token_endpoint_auth_method="none")
+    tokens = sign_in(client, team["alpha"], reg)
+    r = client.post(f"{BASE}/revoke", data={"token": tokens[token_kind], "client_id": reg["client_id"]})
+    assert r.status_code == 200, r.text
+    assert r.headers["cache-control"] == "no-store"
+    assert whoami_rest(client, tokens["access_token"]).status_code == 401
+    assert refresh(client, reg, tokens["refresh_token"]).status_code == 400
+
+
+def test_secret_client_revokes_with_basic(client, team):
+    reg = register(client, token_endpoint_auth_method="client_secret_basic")
+    tokens = sign_in(client, team["alpha"], reg)
+    r = client.post(f"{BASE}/revoke", data={"token": tokens["refresh_token"]},
+                    headers=basic(reg["client_id"], reg["client_secret"]))
+    assert r.status_code == 200, r.text
+    assert whoami_rest(client, tokens["access_token"]).status_code == 401
+    assert refresh(client, reg, tokens["refresh_token"]).status_code == 400
+
+
+def test_secret_client_must_authenticate_to_revoke(client, team):
+    reg = register(client)  # client_secret_post by default: it holds a secret
+    tokens = sign_in(client, team["alpha"], reg)
+    access = tokens["access_token"]
+    for data, headers in (
+        ({"token": access, "client_id": reg["client_id"]}, {}),                      # no secret at all
+        ({"token": access, "client_id": reg["client_id"], "client_secret": ""}, {}),  # an empty one
+        ({"token": access, "client_id": reg["client_id"], "client_secret": "0" * 64}, {}),
+        ({"token": access}, basic(reg["client_id"], "0" * 64)),                     # wrong Basic secret
+    ):
+        r = client.post(f"{BASE}/revoke", data=data, headers=headers)
+        assert r.status_code == 401, (data, r.text)
+    assert whoami_rest(client, access).json()["member"] == "alpha"
+    assert refresh(client, reg, tokens["refresh_token"]).status_code == 200
+
+
+# -- client authentication with HTTP Basic (RFC 6749 §2.3.1) ------------------------
+
+
+def _secret_client(client: TestClient, skein: Skein, source: str) -> dict:
+    if source == "dcr":
+        return register(client, token_endpoint_auth_method="client_secret_basic")
+    added = skein.add_oauth_client("Pre-registered", [REDIRECT])
+    return {"client_id": added["client_id"], "client_secret": added["client_secret"]}
+
+
+@pytest.mark.parametrize("source", ["dcr", "cli"])
+def test_basic_auth_without_body_client_id(client, team, skein, source):
+    """The MCP TypeScript SDK prefers Basic and then sends no client_id in the body."""
+    reg = _secret_client(client, skein, source)
+    auth = basic(reg["client_id"], reg["client_secret"])
+    reg_, verifier, code = _code_for(client, team["alpha"], reg)
+    r = client.post(f"{BASE}/token", headers=auth, data={
+        "grant_type": "authorization_code", "code": code, "code_verifier": verifier, "redirect_uri": REDIRECT,
+    })
+    assert r.status_code == 200, r.text
+    tokens = r.json()
+    assert whoami_rest(client, tokens["access_token"]).json()["member"] == "alpha"
+    r = client.post(f"{BASE}/token", headers=auth,
+                    data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]})
+    assert r.status_code == 200, r.text
+    assert whoami_rest(client, r.json()["access_token"]).json()["member"] == "alpha"
+    # the same id in both places is fine too
+    r = client.post(f"{BASE}/token", headers=auth, data={
+        "grant_type": "refresh_token", "refresh_token": r.json()["refresh_token"], "client_id": reg["client_id"],
+    })
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("other_auth", ["none", "client_secret_post"])
+def test_basic_auth_client_id_mismatch_is_invalid_client(client, team, other_auth):
+    reg = register(client, token_endpoint_auth_method="client_secret_basic")
+    other = register(client, token_endpoint_auth_method=other_auth)
+    reg_, verifier, code = _code_for(client, team["alpha"], reg)
+    data = {"grant_type": "authorization_code", "code": code, "code_verifier": verifier, "redirect_uri": REDIRECT}
+    mine = basic(reg["client_id"], reg["client_secret"])
+    theirs = basic(other["client_id"], other.get("client_secret", ""))
+    for headers, body_id in ((mine, other["client_id"]), (theirs, reg["client_id"])):
+        r = client.post(f"{BASE}/token", headers=headers, data={**data, "client_id": body_id})
+        assert r.status_code == 401, r.text
+        assert r.json()["error"] == "invalid_client"
+        assert r.headers["www-authenticate"].startswith("Basic")
+        assert r.headers["cache-control"] == "no-store"
+    r = client.post(f"{BASE}/revoke", headers=mine, data={"token": "skeino_x", "client_id": other["client_id"]})
+    assert r.status_code == 401 and r.json()["error"] == "invalid_client"
+    # nothing was spent: the code still works with the right credentials
+    r = client.post(f"{BASE}/token", headers=mine, data=data)
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("source", ["dcr", "cli"])
+def test_basic_auth_wrong_secret_is_401(client, team, skein, source):
+    reg = _secret_client(client, skein, source)
+    reg_, verifier, code = _code_for(client, team["alpha"], reg)
+    data = {"grant_type": "authorization_code", "code": code, "code_verifier": verifier, "redirect_uri": REDIRECT}
+    for secret in ("0" * 64, "", reg["client_secret"] + "x"):
+        r = client.post(f"{BASE}/token", headers=basic(reg["client_id"], secret), data=data)
+        assert r.status_code == 401, (secret, r.text)
+    r = client.post(f"{BASE}/token", headers=basic(reg["client_id"], reg["client_secret"]), data=data)
+    assert r.status_code == 200, r.text
+    r = client.post(f"{BASE}/token", headers=basic(reg["client_id"], "0" * 64),
+                    data={"grant_type": "refresh_token", "refresh_token": r.json()["refresh_token"]})
+    assert r.status_code == 401, r.text
+
+
+# -- dynamic registration input -----------------------------------------------------
+
+
+@pytest.mark.parametrize("body", [
+    b"not json",
+    b'{"redirect_uris": ["https://app.example.com/callback"]',  # cut short
+    b"\xff\xfe\x00",                                            # not text
+    b"[" * 100_000,                                             # nested too deep to parse
+    b"[]",
+    b'"https://app.example.com/callback"',
+    b'{"redirect_uris": ["https://app.example.com/callback"], "client_name": "\\ud800"}',
+    b'{"redirect_uris": ["https://app.example.com/callback"], "software_id": "x\\udc00"}',
+    b'{"redirect_uris": ["https://app.example.com/callback"], "contacts": ["\\ud800@example.com"]}',
+    b'{"redirect_uris": ["https://app.example.com/callback"], "\\ud800": 1}',
+])
+def test_register_refuses_bad_bodies_with_400(client, body, capsys):
+    r = client.post(f"{BASE}/register", content=body, headers={"Content-Type": "application/json"})
+    assert r.status_code == 400, r.text
+    assert r.json()["error"] == "invalid_client_metadata"
+    assert client.app.state.skein.list_oauth_clients() == []
+    assert "Traceback" not in "".join(capsys.readouterr())
+    # and a good registration still goes through afterwards
+    register(client)
+
+
+# -- loopback redirect URIs (RFC 8252 §7.3) -----------------------------------------
+
+
+def test_is_loopback_accepts_bracketed_ipv6():
+    assert is_loopback("[::1]") and is_loopback("::1") and is_loopback("LOCALHOST")
+    assert not is_loopback("[::2]") and not is_loopback("[127.0.0.1") and not is_loopback(None)
+
+
+@pytest.mark.parametrize("registered, requested, ok", [
+    ("http://127.0.0.1:5000/cb", "http://127.0.0.1:6000/cb", True),
+    ("http://127.0.0.1:5000/cb", "http://127.0.0.1/cb", True),
+    ("http://[::1]:5000/cb", "http://[::1]:6000/cb", True),
+    ("http://localhost:5000/cb", "http://localhost:6000/cb", True),
+    ("http://127.0.0.1:5000/cb", "http://127.0.0.1:6000/cb#f", False),
+    ("http://127.0.0.1:5000/cb", "http://127.0.0.1:6000/cb#", False),
+    ("http://127.0.0.1:5000/cb", "http://user:pw@127.0.0.1:6000/cb", False),
+    ("http://127.0.0.1:5000/cb", "http://user@127.0.0.1:6000/cb", False),
+    ("http://[::1]:5000/cb", "http://user@[::1]:6000/cb", False),
+    ("http://[::1]:5000/cb", "http://[::1]:6000/cb#f", False),
+    ("http://127.0.0.1:5000/cb", "http://localhost:6000/cb", False),
+    ("http://127.0.0.1:5000/cb", "http://127.0.0.1:6000/other", False),
+    ("http://127.0.0.1:5000/cb", "https://127.0.0.1:6000/cb", False),
+    ("https://app.example.com/cb", "https://app.example.com:8443/cb", False),
+])
+def test_loopback_redirect_matching(registered, requested, ok):
+    assert oauth_mod.redirect_allowed(requested, [registered]) is ok
+
+
+def test_loopback_sign_in_on_another_port(client, team):
+    reg = register(client, redirect_uris=["http://127.0.0.1:5000/cb", "http://[::1]:5000/cb"],
+                   token_endpoint_auth_method="none")
+    for requested in ("http://127.0.0.1:5000/cb#f", "http://user:pw@127.0.0.1:6000/cb",
+                      "http://[::1]:6000/cb#f", "http://localhost:6000/cb"):
+        _, challenge = pkce()
+        r = authorize(client, reg["client_id"], challenge, redirect_uri=requested)
+        assert r.status_code == 400 and "location" not in r.headers, requested
+    for requested in ("http://127.0.0.1:6123/cb", "http://[::1]:6123/cb"):
+        reg_, verifier, code = _code_for(client, team["alpha"], reg, redirect_uri=requested)
+        r = exchange(client, reg, code, verifier, redirect_uri=requested)
+        assert r.status_code == 200, (requested, r.text)
+        assert whoami_rest(client, r.json()["access_token"]).json()["member"] == "alpha"
 
 
 # -- expiry (injectable clock) ------------------------------------------------------

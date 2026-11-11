@@ -156,7 +156,11 @@ def _append_note(notes: list[dict[str, Any]], t: float, frm: str, text: str) -> 
 
 
 def is_loopback(host: str | None) -> bool:
-    return (host or "").lower() in LOOPBACK_HOSTS
+    """A loopback host; an IPv6 literal may keep its URL brackets (``[::1]``, as pydantic gives it)."""
+    host = (host or "").lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host in LOOPBACK_HOSTS
 
 
 def check_redirect_uri(uri: Any) -> str:
