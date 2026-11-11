@@ -658,6 +658,56 @@ def test_disabling_a_member_revokes_oauth_tokens(client, team, skein):
     assert whoami_rest(client, team["alpha"]).json()["member"] == "alpha"
 
 
+def _grants(skein: Skein, member: str) -> list[str]:
+    """Every code and token the store holds for ``member``."""
+    with skein.store.tx(write=False) as db:
+        rows = db.conn.execute(
+            "SELECT 'code' FROM oauth_codes WHERE member = ? "
+            "UNION ALL SELECT kind FROM oauth_tokens WHERE member = ?", (member, member),
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
+@pytest.mark.parametrize("change", ["rotate", "disable"])
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_member_change_racing_consent_leaves_no_grant(client, team, skein, audit_path, monkeypatch,
+                                                      change, when):
+    """A rotate or disable that commits while a consent POST is in flight wins either way:
+    just before the approval's write transaction (the token no longer matches, so no code) or
+    just after it (the code it wrote is deleted with the member's other grants)."""
+    decide = oauth_mod.SkeinOAuth._decide
+
+    def member_change() -> None:
+        if change == "rotate":
+            skein.rotate_token("alpha")
+        else:
+            skein.set_disabled("alpha", True)
+
+    def racing(self, *args):
+        # the form's token has been read; the decision has not been written yet (or just was)
+        if when == "before":
+            member_change()
+        outcome = decide(self, *args)
+        if when == "after":
+            member_change()
+        return outcome
+
+    monkeypatch.setattr(oauth_mod.SkeinOAuth, "_decide", racing)
+    reg = register(client)
+    verifier, challenge = pkce()
+    req = consent_req(authorize(client, reg["client_id"], challenge))
+    r = consent(client, req, team["alpha"])
+    if when == "before":
+        assert r.status_code == 400 and "location" not in r.headers
+        assert "match an enabled member" in r.text
+        consents = [e["event"] for e in oauth_events(audit_path) if e["event"].startswith("consent")]
+        assert consents == ["consent_failed"]
+    else:
+        assert exchange(client, reg, code_from(r), verifier).status_code == 400
+    assert _grants(skein, "alpha") == []  # no code, so no token can ever follow
+    assert whoami_rest(client, team["alpha"]).status_code == 401  # the old fixed token is dead too
+
+
 # -- CLI clients --------------------------------------------------------------------
 
 
@@ -788,7 +838,7 @@ def test_dcr_refuses_bad_redirect_uris(client, uris):
 
 def test_dcr_accepts_loopback_and_private_schemes(client):
     register(client, redirect_uris=["http://127.0.0.1:7777/cb", "http://localhost/cb"])
-    register(client, redirect_uris=["cursor://anysphere.cursor-retrieval/oauth/callback"])
+    register(client, redirect_uris=["com.example.app:/oauth/callback"])
 
 
 def test_dcr_is_capped(make_client, team, monkeypatch, clock):

@@ -143,6 +143,18 @@ def _form_str(form: FormData, key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _member_for_token(db: Any, token: str) -> str | None:
+    """The enabled member a fixed member token belongs to, read in the caller's transaction
+    (the same check as :meth:`Skein.authenticate`, but not in a transaction of its own)."""
+    if not token or len(token) > TOKEN_MAX:
+        return None
+    digest = hash_token(token)
+    row = db.get_member_by_token_hash(digest)
+    if row is None or row["disabled"] or not hashes_match(row["token_sha256"], digest):
+        return None
+    return row["name"]
+
+
 def _basic_secret(header: str) -> str | None:
     """The secret in ``Authorization: Basic …``, decoded the way the SDK decodes it."""
     try:
@@ -504,8 +516,14 @@ class SkeinOAuth:
         url = construct_redirect_uri(pending["redirect_uri"], error="access_denied", state=pending["state"])
         return _Outcome("redirect", url=url)
 
-    def _decide(self, req: str, member: str | None) -> _Outcome:
-        """Approve with a member's name (its token checked), or count a bad token (None)."""
+    def _decide(self, req: str, token: str) -> _Outcome:
+        """Approve as the member whose fixed token this is, or count a token that matches no
+        enabled member.
+
+        The token is resolved inside the write transaction that issues the code, so a
+        ``rotate_token`` or disable commits either before it (the token no longer matches: no
+        code) or after it (and then deletes the new code with the member's other grants).
+        """
         now = self._now()
         event: dict[str, Any] = {}
         with self.store.tx() as db:
@@ -514,6 +532,7 @@ class SkeinOAuth:
             if pending is None or client is None:
                 return _Outcome("expired")
             cid = client["client_id"]
+            member = _member_for_token(db, token)
             if member is None:
                 attempts = pending["attempts"] + 1
                 event = {"event": "consent_failed", "client_id": cid, "attempts": attempts}
@@ -744,8 +763,7 @@ class SkeinOAuth:
             outcome = await _run(self._deny, req)
         else:
             token = _form_str(form, "token").strip()
-            member = await _run(self.skein.authenticate, token) if token else None
-            outcome = await _run(self._decide, req, member)
+            outcome = await _run(self._decide, req, token)
         return self._render(outcome, req)
 
     def _render(self, outcome: _Outcome, req: str) -> Response:
