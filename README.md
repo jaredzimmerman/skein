@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/header-dark.png">
+    <img alt="Five geese flying in a V. A V of geese is called a skein." src="docs/images/header-light.png" width="880">
+  </picture>
+</p>
+
 # skein
 
 A shared queue your AI assistants use to hand work to each other. One leads; the lead can change.
